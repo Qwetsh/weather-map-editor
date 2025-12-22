@@ -1,0 +1,585 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import {
+  Trash2,
+  Download,
+  Image as ImageIcon,
+  Type,
+  MousePointer2,
+  Thermometer,
+  Moon,
+  Sun,
+} from "lucide-react";
+import { toPng } from "html-to-image";
+
+/**
+ * Éditeur de carte météo (React)
+ * ✅ Fonds intégrés (France / Europe / Monde + grille) + upload possible
+ * ✅ Ajout d'icônes (drag & drop)
+ * ✅ Ajout de villes (labels)
+ * ✅ Ajout de températures (badges)
+ * ✅ Export PNG
+ * ✅ Fix overflow: stage responsive (ne déborde plus sur le panneau de droite)
+ */
+
+const ICONS = [
+  { id: "sun", label: "Soleil", glyph: "☀️" },
+  { id: "cloud", label: "Nuages", glyph: "☁️" },
+  { id: "rain", label: "Pluie", glyph: "🌧️" },
+  { id: "storm", label: "Orage", glyph: "⛈️" },
+  { id: "snow", label: "Neige", glyph: "🌨️" },
+  { id: "wind", label: "Vent", glyph: "💨" },
+  { id: "hot", label: "Canicule", glyph: "🔥" },
+  { id: "flood", label: "Inondation", glyph: "🌊" },
+  { id: "cyclone", label: "Cyclone", glyph: "🌀" },
+];
+
+function uid(prefix = "el") {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function svgDataUri(svg: string) {
+  // data URI safe-ish
+  const encoded = encodeURIComponent(svg)
+    .replace(/'/g, "%27")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+  return `data:image/svg+xml;charset=utf-8,${encoded}`;
+}
+
+// Fonds intégrés (simplifiés) : pas d’assets externes.
+const BUILTIN_BACKGROUNDS = [
+  {
+    id: "grid",
+    label: "Grille vierge",
+    src: svgDataUri(`
+      <svg xmlns='http://www.w3.org/2000/svg' width='1600' height='900' viewBox='0 0 1600 900'>
+        <defs>
+          <linearGradient id='bg' x1='0' y1='0' x2='0' y2='1'>
+            <stop offset='0' stop-color='#eaf2ff'/>
+            <stop offset='1' stop-color='#ffffff'/>
+          </linearGradient>
+          <pattern id='grid' width='80' height='80' patternUnits='userSpaceOnUse'>
+            <path d='M80 0H0V80' fill='none' stroke='#cbd5e1' stroke-width='1'/>
+          </pattern>
+        </defs>
+        <rect width='1600' height='900' fill='url(#bg)'/>
+        <rect width='1600' height='900' fill='url(#grid)' opacity='0.55'/>
+        <text x='60' y='90' font-family='Arial' font-size='44' font-weight='700' fill='#1f2937'>Carte météo</text>
+        <text x='60' y='140' font-family='Arial' font-size='22' fill='#475569'>Fond neutre pour placer villes, températures et pictos</text>
+      </svg>
+    `),
+  },
+  {
+    id: "france",
+    label: "France (simplifiée)",
+    src: "/img/france.png",
+  },
+  {
+    id: "europe",
+    label: "Europe (simplifiée)",
+    src: "/img/europe.png",
+  },
+  {
+    id: "world",
+    label: "Monde (simplifié)",
+    src: "/img/world.png",
+  },
+];
+
+type BaseElement = {
+  id: string;
+  kind: "icon" | "label" | "temp";
+  x: number; // percent 0..100
+  y: number; // percent 0..100
+};
+
+type IconElement = BaseElement & {
+  kind: "icon";
+  iconId: string;
+  size: number; // px
+};
+
+type LabelElement = BaseElement & {
+  kind: "label";
+  text: string;
+  fontSize: number;
+  color: string;
+  bg: boolean;
+  border: boolean;
+};
+
+type TempElement = BaseElement & {
+  kind: "temp";
+  value: string; // ex: "42" ou "42 / +4"
+  fontSize: number;
+  color: string;
+  bg: boolean;
+  border: boolean;
+};
+
+type ElementT = IconElement | LabelElement | TempElement;
+
+export default function WeatherMapEditor() {
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
+  // Fond: intégré par défaut
+  const [bgId, setBgId] = useState(BUILTIN_BACKGROUNDS[0].id);
+  const [bgUrl, setBgUrl] = useState<string | null>(BUILTIN_BACKGROUNDS[0].src);
+  const [aspectRatio, setAspectRatio] = useState("16 / 9");
+
+  const [elements, setElements] = useState<ElementT[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const [activeTool, setActiveTool] = useState<"select" | "add-icon" | "add-label" | "add-temp">("select");
+  const [chosenIconId, setChosenIconId] = useState(ICONS[0].id);
+
+  const [newLabelText, setNewLabelText] = useState("Paris");
+  const [newTempText, setNewTempText] = useState("42");
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  const selected = useMemo(
+    () => elements.find((e) => e.id === selectedId) ?? null,
+    [elements, selectedId]
+  );
+
+  const selectedIcon = selected?.kind === "icon" ? ICONS.find((i) => i.id === selected.iconId) : null;
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' && selectedId) {
+        deleteSelected();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedId]);
+
+  // Theme initialization
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
+    const initialTheme = savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    setTheme(initialTheme);
+    document.documentElement.classList.toggle('dark', initialTheme === 'dark');
+  }, []);
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+    document.documentElement.classList.toggle('dark', newTheme === 'dark');
+    localStorage.setItem('theme', newTheme);
+  };
+
+  function setBuiltinBg(id: string) {
+    const bg = BUILTIN_BACKGROUNDS.find((b) => b.id === id) ?? BUILTIN_BACKGROUNDS[0];
+    if (bg.id === "grid") {
+      setBgId(bg.id);
+      setBgUrl(bg.src);
+      setAspectRatio("16 / 9");
+      setSelectedId(null);
+    } else {
+      // For PNG images, load to get dimensions
+      const img = new Image();
+      img.onload = () => {
+        setAspectRatio(`${img.naturalWidth} / ${img.naturalHeight}`);
+        setBgId(bg.id);
+        setBgUrl(bg.src);
+        setSelectedId(null);
+      };
+      img.src = bg.src;
+    }
+  }
+
+  function onUploadBg(file: File | null) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        setAspectRatio(`${img.naturalWidth} / ${img.naturalHeight}`);
+        setBgId("upload");
+        setBgUrl(dataUrl);
+        setSelectedId(null);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function stagePointPctFromEvent(evt: React.PointerEvent) {
+    const rect = stageRef.current?.getBoundingClientRect();
+    if (!rect) return { xPct: 0, yPct: 0 };
+    const x = ((evt.clientX - rect.left) / rect.width) * 100;
+    const y = ((evt.clientY - rect.top) / rect.height) * 100;
+    return { xPct: clamp(x, 0, 100), yPct: clamp(y, 0, 100) };
+  }
+
+  function addIconAtPct(x: number, y: number) {
+    const el: IconElement = { id: uid("icon"), kind: "icon", iconId: chosenIconId, x, y, size: 44 };
+    setElements((prev) => [...prev, el]);
+    setSelectedId(el.id);
+  }
+
+  function addLabelAtPct(x: number, y: number) {
+    const el: LabelElement = {
+      id: uid("label"),
+      kind: "label",
+      text: newLabelText.trim() || "Ville",
+      x,
+      y,
+      fontSize: 20,
+      color: "#111827",
+      bg: true,
+      border: true,
+    };
+    setElements((prev) => [...prev, el]);
+    setSelectedId(el.id);
+  }
+
+  function addTempAtPct(x: number, y: number) {
+    const el: TempElement = {
+      id: uid("temp"),
+      kind: "temp",
+      value: (newTempText.trim() || "25").replace(/\s+/g, " "),
+      x,
+      y,
+      fontSize: 20,
+      color: "#0f172a",
+      bg: true,
+      border: true,
+    };
+    setElements((prev) => [...prev, el]);
+    setSelectedId(el.id);
+  }
+
+  // Drag (en %)
+  const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
+
+  function onStagePointerDown(e: React.PointerEvent) {
+    if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp") {
+      const p = stagePointPctFromEvent(e);
+      if (activeTool === "add-icon") addIconAtPct(p.xPct, p.yPct);
+      else if (activeTool === "add-label") addLabelAtPct(p.xPct, p.yPct);
+      else addTempAtPct(p.xPct, p.yPct);
+      return;
+    }
+    setSelectedId(null);
+  }
+
+  function onElementPointerDown(e: React.PointerEvent, id: string) {
+    e.stopPropagation();
+    setSelectedId(id);
+    const p = stagePointPctFromEvent(e);
+    const el = elements.find((x) => x.id === id);
+    if (!el) return;
+    dragRef.current = { id, dx: p.xPct - el.x, dy: p.yPct - el.y };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function onElementPointerMove(e: React.PointerEvent, id: string) {
+    const d = dragRef.current;
+    if (!d || d.id !== id) return;
+    e.stopPropagation();
+    const p = stagePointPctFromEvent(e);
+    const nx = clamp(p.xPct - d.dx, 0, 100);
+    const ny = clamp(p.yPct - d.dy, 0, 100);
+    setElements((prev) => prev.map((el) => (el.id === id ? { ...el, x: nx, y: ny } : el)));
+  }
+
+  function onElementPointerUp(_e: React.PointerEvent, id: string) {
+    const d = dragRef.current;
+    if (d && d.id === id) dragRef.current = null;
+  }
+
+  function deleteSelected() {
+    if (!selectedId) return;
+    setElements((prev) => prev.filter((e) => e.id !== selectedId));
+    setSelectedId(null);
+  }
+
+  async function exportPng() {
+    if (!stageRef.current) {
+      console.error("No stage ref");
+      return;
+    }
+    try {
+      const dataUrl = await toPng(stageRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: theme === 'dark' ? "#1f2937" : "#ffffff",
+      });
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = "weather-map-2050.png";
+      a.click();
+    } catch (error) {
+      console.error("Export failed:", error);
+    }
+  }
+
+  function updateSelected(patch: Partial<ElementT>) {
+    if (!selectedId) return;
+    setElements((prev) => prev.map((e) => (e.id === selectedId ? ({ ...e, ...patch } as ElementT) : e)));
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-900 p-4 md:p-6">
+      <div className="mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Gauche : carte */}
+        <Card className="md:col-span-1 rounded-2xl shadow-sm min-w-0">
+          <CardContent className="p-4 md:p-5">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+              <div>
+                <div className="text-xl font-semibold">Éditeur de carte météo</div>
+                <div className="text-sm text-slate-600 dark:text-slate-400">Fonds intégrés + icônes + villes + températures. Export en PNG.</div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={toggleTheme} className="rounded-xl gap-2">
+                  {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+                  {theme === 'light' ? 'Dark' : 'Light'}
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-4">
+              <Button variant={activeTool === "select" ? "default" : "outline"} onClick={() => setActiveTool("select")} className="rounded-xl gap-2">
+                <MousePointer2 className="h-4 w-4" /> Sélection
+              </Button>
+              <Button variant={activeTool === "add-icon" ? "default" : "outline"} onClick={() => setActiveTool("add-icon")} className="rounded-xl gap-2">
+                <ImageIcon className="h-4 w-4" /> Icône
+              </Button>
+              <Button variant={activeTool === "add-label" ? "default" : "outline"} onClick={() => setActiveTool("add-label")} className="rounded-xl gap-2">
+                <Type className="h-4 w-4" /> Ville
+              </Button>
+              <Button variant={activeTool === "add-temp" ? "default" : "outline"} onClick={() => setActiveTool("add-temp")} className="rounded-xl gap-2">
+                <Thermometer className="h-4 w-4" /> Température
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              <div>
+                <Label className="text-sm">Fonds intégrés</Label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {BUILTIN_BACKGROUNDS.map((b) => (
+                    <Button key={b.id} variant={bgId === b.id ? "default" : "outline"} className="rounded-xl" onClick={() => setBuiltinBg(b.id)}>
+                      {b.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label className="text-sm">Importer un fond (option)</Label>
+                <div className="mt-2 flex gap-2 items-center">
+                  <Input type="file" accept="image/*" onChange={(e) => onUploadBg(e.target.files?.[0] ?? null)} />
+                  <Button variant="outline" className="rounded-xl" onClick={() => setBuiltinBg(BUILTIN_BACKGROUNDS[0].id)}>
+                    Réinitialiser
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              <Button className="rounded-xl gap-2" onClick={exportPng}>
+                <Download className="h-4 w-4" /> Export PNG
+              </Button>
+              <Button variant="outline" className="rounded-xl gap-2" onClick={deleteSelected} disabled={!selectedId}>
+                <Trash2 className="h-4 w-4" /> Supprimer
+              </Button>
+            </div>
+
+            {/* STAGE RESPONSIVE : plus de width fixe => plus de débordement */}
+            <div className="rounded-2xl border bg-white dark:bg-slate-800 p-3 min-w-0">
+              <div
+                ref={stageRef}
+                onPointerDown={onStagePointerDown}
+                className="relative w-full overflow-hidden rounded-xl border bg-slate-100 dark:bg-slate-700"
+                style={{ aspectRatio }}
+              >
+                {bgUrl ? (
+                  <img src={bgUrl} alt="Fond de carte" className="absolute inset-0 h-full w-full object-contain" draggable={false} />
+                ) : null}
+
+                {elements.map((el) => {
+                  const isSel = el.id === selectedId;
+                  const baseClass = "absolute select-none cursor-move" + (isSel ? " border-2 border-dashed border-indigo-500 rounded-lg" : "");
+
+                  if (el.kind === "icon") {
+                    const icon = ICONS.find((i) => i.id === el.iconId) ?? ICONS[0];
+                    return (
+                      <div
+                        key={el.id}
+                        onPointerDown={(e) => onElementPointerDown(e, el.id)}
+                        onPointerMove={(e) => onElementPointerMove(e, el.id)}
+                        onPointerUp={(e) => onElementPointerUp(e, el.id)}
+                        className={baseClass}
+                        style={{ left: `${el.x}%`, top: `${el.y}%`, transform: "translate(-50%, -50%)", fontSize: el.size, padding: 4 }}
+                        title={icon.label}
+                      >
+                        <span aria-label={icon.label}>{icon.glyph}</span>
+                      </div>
+                    );
+                  }
+
+                  if (el.kind === "temp") {
+                    return (
+                      <div
+                        key={el.id}
+                        onPointerDown={(e) => onElementPointerDown(e, el.id)}
+                        onPointerMove={(e) => onElementPointerMove(e, el.id)}
+                        onPointerUp={(e) => onElementPointerUp(e, el.id)}
+                        className={baseClass}
+                        style={{ left: `${el.x}%`, top: `${el.y}%`, transform: "translate(-50%, -50%)" }}
+                        title="Température"
+                      >
+                        <div
+                          className={"px-2 py-1 rounded-xl " + (el.bg ? "bg-white/90" : "bg-transparent") + (el.border ? " border shadow-sm" : "")}
+                          style={{ color: el.color, fontSize: el.fontSize, fontWeight: 800, cursor: 'move' }}
+                        >
+                          {String(el.value).includes("°") ? el.value : `${el.value}°C`}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // label
+                  return (
+                    <div
+                      key={el.id}
+                      onPointerDown={(e) => onElementPointerDown(e, el.id)}
+                      onPointerMove={(e) => onElementPointerMove(e, el.id)}
+                      onPointerUp={(e) => onElementPointerUp(e, el.id)}
+                      className={baseClass}
+                      style={{ left: `${el.x}%`, top: `${el.y}%`, transform: "translate(-50%, -50%)" }}
+                      title="Ville"
+                    >
+                      <div className={"px-2 py-1 rounded-lg " + (el.bg ? "bg-white/85 backdrop-blur" : "") + (el.border ? " border shadow-sm" : "")} style={{ color: el.color, fontSize: el.fontSize, fontWeight: 700, cursor: 'move' }}>
+                        {el.text}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-3 text-xs text-slate-600 cursor-default">
+                <span className="font-semibold">Astuce :</span> clique sur « Icône / Ville / Température », puis clique sur la carte. Déplace en glissant. Clique sur un élément pour l’éditer.
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Droite : panneau */}
+        <Card className="rounded-2xl shadow-sm min-w-0">
+          <CardContent className="p-4 md:p-5 space-y-4">
+            <div className="text-lg font-semibold">Panneau de contrôle</div>
+            <div className="text-sm text-slate-600 cursor-default">Choisis ce que tu veux ajouter, puis clique sur la carte.</div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="font-semibold text-sm">Ajouter une icône</div>
+              <div className="grid grid-cols-2 gap-2">
+                {ICONS.map((ic) => (
+                  <Button
+                    key={ic.id}
+                    variant={chosenIconId === ic.id ? "default" : "outline"}
+                    className="justify-start rounded-xl gap-2"
+                    onClick={() => {
+                      setChosenIconId(ic.id);
+                      setActiveTool("add-icon");
+                    }}
+                  >
+                    <span className="text-lg">{ic.glyph}</span>
+                    <span className="text-xs">{ic.label}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="font-semibold text-sm">Ajouter une ville</div>
+              <div className="space-y-2">
+                <Label className="text-xs">Nom de la ville</Label>
+                <Input value={newLabelText} onChange={(e) => setNewLabelText(e.target.value)} placeholder="Ex: Nantes" />
+                <Button className="rounded-xl" onClick={() => setActiveTool("add-label")}>Placer la ville</Button>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="font-semibold text-sm">Ajouter une température</div>
+              <div className="space-y-2">
+                <Label className="text-xs">Valeur (ex : 42 ou 42 / +4)</Label>
+                <Input value={newTempText} onChange={(e) => setNewTempText(e.target.value)} placeholder="Ex: 42 / +4" />
+                <Button className="rounded-xl" onClick={() => setActiveTool("add-temp")}>Placer la température</Button>
+                <div className="text-xs text-slate-600 cursor-default">Astuce : « 42 / +4 » = 42°C et anomalie +4°C.</div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="font-semibold text-sm">Éditer la sélection</div>
+              {!selected ? (
+                <div className="text-sm text-slate-500 cursor-default">Aucun élément sélectionné.</div>
+              ) : selected.kind === "icon" ? (
+                <div className="space-y-3">
+                  <div className="text-sm text-slate-700 cursor-default">
+                    Sélection : <span className="font-semibold">{selectedIcon?.label ?? "Icône"}</span>
+                  </div>
+                  <Label className="text-xs">Taille</Label>
+                  <Input type="range" min={24} max={80} value={selected.size} onChange={(e) => updateSelected({ size: Number(e.target.value) } as any)} />
+                </div>
+              ) : selected.kind === "label" ? (
+                <div className="space-y-3">
+                  <Label className="text-xs">Texte</Label>
+                  <Input value={selected.text} onChange={(e) => updateSelected({ text: e.target.value } as any)} />
+                  <Label className="text-xs">Taille du texte</Label>
+                  <Input type="range" min={12} max={40} value={selected.fontSize} onChange={(e) => updateSelected({ fontSize: Number(e.target.value) } as any)} />
+                  <Label className="text-xs">Couleur</Label>
+                  <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} />
+                  <div className="flex items-center gap-2">
+                    <input id="bg" type="checkbox" checked={selected.bg} onChange={(e) => updateSelected({ bg: e.target.checked } as any)} />
+                    <Label htmlFor="bg" className="text-sm">Fond blanc derrière</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input id="border" type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} />
+                    <Label htmlFor="border" className="text-sm">Bordure</Label>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <Label className="text-xs">Température</Label>
+                  <Input value={selected.value} onChange={(e) => updateSelected({ value: e.target.value } as any)} />
+                  <Label className="text-xs">Taille</Label>
+                  <Input type="range" min={12} max={42} value={selected.fontSize} onChange={(e) => updateSelected({ fontSize: Number(e.target.value) } as any)} />
+                  <Label className="text-xs">Couleur</Label>
+                  <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} />
+                  <div className="flex items-center gap-2">
+                    <input id="tbg" type="checkbox" checked={selected.bg} onChange={(e) => updateSelected({ bg: e.target.checked } as any)} />
+                    <Label htmlFor="tbg" className="text-sm">Fond blanc derrière</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input id="tborder" type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} />
+                    <Label htmlFor="tborder" className="text-sm">Bordure</Label>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
