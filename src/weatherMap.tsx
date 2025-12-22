@@ -81,17 +81,17 @@ const BUILTIN_BACKGROUNDS = [
   {
     id: "france",
     label: "France (simplifiée)",
-    src: "/img/france.png",
+    src: "/weather-map-editor/img/france.png",
   },
   {
     id: "europe",
     label: "Europe (simplifiée)",
-    src: "/img/europe.png",
+    src: "/weather-map-editor/img/europe.png",
   },
   {
     id: "world",
     label: "Monde (simplifié)",
-    src: "/img/world.png",
+    src: "/weather-map-editor/img/world.png",
   },
 ];
 
