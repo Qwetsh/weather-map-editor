@@ -15,6 +15,9 @@ import {
   Sun,
 } from "lucide-react";
 import { toPng } from "html-to-image";
+import franceImg from "/img/france.png";
+import europeImg from "/img/europe.png";
+import worldImg from "/img/world.png";
 
 /**
  * Éditeur de carte météo (React)
@@ -81,17 +84,17 @@ const BUILTIN_BACKGROUNDS = [
   {
     id: "france",
     label: "France (simplifiée)",
-    src: "/img/france.png",
+    src: franceImg,
   },
   {
     id: "europe",
     label: "Europe (simplifiée)",
-    src: "/img/europe.png",
+    src: europeImg,
   },
   {
     id: "world",
     label: "Monde (simplifié)",
-    src: "/img/world.png",
+    src: worldImg,
   },
 ];
 
