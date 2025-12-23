@@ -796,45 +796,46 @@ export default function WeatherMapEditor() {
 
         {/* Droite : panneau */}
         <Card className="rounded-2xl shadow-sm min-w-0">
-          <CardContent className="p-4 md:p-5 space-y-4">
-            <div className="flex flex-wrap gap-2 mb-2">
-              <Button variant={activeTool === "select" ? "default" : "outline"} onClick={() => setActiveTool("select")} className="rounded-xl gap-2">
-                <MousePointer2 className="h-4 w-4" /> Sélection
-              </Button>
-              <Button variant={activeTool === "add-icon" ? "default" : "outline"} onClick={() => setActiveTool("add-icon")} className="rounded-xl gap-2">
-                <ImageIcon className="h-4 w-4" /> Icône
-              </Button>
-              <Button variant={activeTool === "add-label" ? "default" : "outline"} onClick={() => setActiveTool("add-label")} className="rounded-xl gap-2">
-                <Type className="h-4 w-4" /> Ville
-              </Button>
-              <Button variant={activeTool === "add-temp" ? "default" : "outline"} onClick={() => setActiveTool("add-temp")} className="rounded-xl gap-2">
-                <Thermometer className="h-4 w-4" /> Température
-              </Button>
-              <Button variant={activeTool === "add-wind" ? "default" : "outline"} onClick={() => setActiveTool("add-wind")} className="rounded-xl gap-2">
-                <Wind className="h-4 w-4" /> Vent
-              </Button>
+          <CardContent className="p-4 md:p-5 space-y-3">
+            <div>
+              <div className="text-lg font-semibold mb-2">Outils</div>
+              <div className="grid grid-cols-3 gap-2">
+                <Button variant={activeTool === "select" ? "default" : "outline"} onClick={() => setActiveTool("select")} className="rounded-lg" size="sm">
+                  <MousePointer2 className="h-4 w-4" />
+                </Button>
+                <Button variant={activeTool === "add-icon" ? "default" : "outline"} onClick={() => setActiveTool("add-icon")} className="rounded-lg" size="sm">
+                  <ImageIcon className="h-4 w-4" />
+                </Button>
+                <Button variant={activeTool === "add-label" ? "default" : "outline"} onClick={() => setActiveTool("add-label")} className="rounded-lg" size="sm">
+                  <Type className="h-4 w-4" />
+                </Button>
+                <Button variant={activeTool === "add-temp" ? "default" : "outline"} onClick={() => setActiveTool("add-temp")} className="rounded-lg" size="sm">
+                  <Thermometer className="h-4 w-4" />
+                </Button>
+                <Button variant={activeTool === "add-wind" ? "default" : "outline"} onClick={() => setActiveTool("add-wind")} className="rounded-lg" size="sm">
+                  <Wind className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-
-            <div className="text-lg font-semibold">Panneau de contrôle</div>
-            <div className="text-sm text-slate-600 dark:text-slate-300 cursor-default">Choisis ce que tu veux ajouter, puis clique sur la carte.</div>
 
             <Separator />
 
-            <div className="space-y-3">
-              <div className="font-semibold text-sm">Ajouter une icône</div>
-              <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto overflow-x-hidden pr-1">
+            <div className="space-y-2">
+              <div className="font-semibold text-sm">Icônes</div>
+              <div className="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto overflow-x-hidden pr-1">
                 {getAvailableIcons().map((ic) => (
                   <div key={ic.id} className="relative">
                     <Button
                       variant={chosenIconId === ic.id ? "default" : "outline"}
-                      className="justify-start rounded-xl gap-2 w-full"
+                      className="h-10 w-full p-1 rounded-lg"
+                      size="sm"
                       onClick={() => {
                         setChosenIconId(ic.id);
                         setActiveTool("add-icon");
                       }}
+                      title={ic.label}
                     >
-                      <span className="text-lg">{ic.glyph}</span>
-                      <span className="text-xs flex-1 text-left truncate">{ic.label}</span>
+                      <span className="text-xl">{ic.glyph}</span>
                     </Button>
                     {customIcons.find((ci) => ci.id === ic.id) && (
                       <button
@@ -849,194 +850,173 @@ export default function WeatherMapEditor() {
                 ))}
               </div>
 
-              <div className="space-y-2 pt-2 border-t">
-                <Label className="text-xs font-semibold">Créer une icône personnalisée</Label>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs">Choisir un emoji</Label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                      className="h-6 px-2 text-xs"
-                    >
-                      {showEmojiPicker ? 'Masquer' : 'Afficher'} 😊
-                    </Button>
-                  </div>
-                  {showEmojiPicker && (
-                    <div className="grid grid-cols-8 gap-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-lg max-h-32 overflow-y-auto">
+              <details className="pt-2 border-t">
+                <summary className="text-xs font-semibold cursor-pointer hover:text-blue-600">+ Créer icône perso</summary>
+                <div className="space-y-2 mt-2">
+                  <details>
+                    <summary className="text-xs cursor-pointer mb-1">Emojis 😊</summary>
+                    <div className="grid grid-cols-8 gap-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-lg max-h-24 overflow-y-auto mt-1">
                       {EMOJI_PICKER.map((emoji, idx) => (
                         <button
                           key={idx}
                           type="button"
                           onClick={() => setNewCustomIconGlyph(emoji)}
-                          className={`text-xl p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors ${
-                            newCustomIconGlyph === emoji ? 'bg-slate-300 dark:bg-slate-500 ring-2 ring-blue-500' : ''
+                          className={`text-lg p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600 ${
+                            newCustomIconGlyph === emoji ? 'bg-slate-300 dark:bg-slate-500 ring-1 ring-blue-500' : ''
                           }`}
-                          title={emoji}
                         >
                           {emoji}
                         </button>
                       ))}
                     </div>
-                  )}
+                  </details>
+                  <div className="flex gap-1">
+                    <Input
+                      type="text"
+                      value={newCustomIconGlyph}
+                      onChange={(e) => setNewCustomIconGlyph(e.target.value)}
+                      maxLength={2}
+                      className="w-12 text-center text-lg h-8 p-1"
+                    />
+                    <Input
+                      type="text"
+                      placeholder="Nom"
+                      value={newCustomIconLabel}
+                      onChange={(e) => setNewCustomIconLabel(e.target.value)}
+                      className="flex-1 h-8 text-xs"
+                    />
+                    <Button size="sm" className="rounded-lg h-8 px-2 text-xs" onClick={addCustomIcon}>
+                      +
+                    </Button>
+                  </div>
                 </div>
+              </details>
+            </div>
 
-                <div className="flex gap-2">
-                  <Input
-                    type="text"
-                    placeholder="Emoji ou caractère"
-                    value={newCustomIconGlyph}
-                    onChange={(e) => setNewCustomIconGlyph(e.target.value)}
-                    maxLength={2}
-                    className="w-16 text-center text-xl"
-                  />
-                  <Input
-                    type="text"
-                    placeholder="Nom"
-                    value={newCustomIconLabel}
-                    onChange={(e) => setNewCustomIconLabel(e.target.value)}
-                    className="flex-1"
-                  />
+            <Separator />
+
+            <div className="space-y-2">
+              <div className="font-semibold text-sm">Éléments texte</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Ville</Label>
+                  <Input value={newLabelText} onChange={(e) => setNewLabelText(e.target.value)} placeholder="Paris" className="h-8 text-xs" />
                 </div>
-                <Button className="w-full rounded-xl text-xs" onClick={addCustomIcon}>
-                  + Ajouter
-                </Button>
+                <div className="space-y-1">
+                  <Label className="text-xs">Temp (°C)</Label>
+                  <Input value={newTempText} onChange={(e) => setNewTempText(e.target.value)} placeholder="42" className="h-8 text-xs" />
+                </div>
               </div>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-3">
-              <div className="font-semibold text-sm">Ajouter une ville</div>
-              <div className="space-y-2">
-                <Label className="text-xs">Nom de la ville</Label>
-                <Input value={newLabelText} onChange={(e) => setNewLabelText(e.target.value)} placeholder="Ex: Nantes" />
-                <Button className="rounded-xl" onClick={() => setActiveTool("add-label")}>Placer la ville</Button>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-3">
-              <div className="font-semibold text-sm">Ajouter une température</div>
-              <div className="space-y-2">
-                <Label className="text-xs">Valeur (ex : 42 ou 42 / +4)</Label>
-                <Input value={newTempText} onChange={(e) => setNewTempText(e.target.value)} placeholder="Ex: 42 / +4" />
-                <Button className="rounded-xl" onClick={() => setActiveTool("add-temp")}>Placer la température</Button>
-                <div className="text-xs text-slate-600 dark:text-slate-300 cursor-default">Astuce : « 42 / +4 » = 42°C et anomalie +4°C.</div>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-3">
-              <div className="font-semibold text-sm">Ajouter un vent</div>
-              <div className="space-y-2">
-                <Label className="text-xs">Vitesse en km/h</Label>
+              <div className="space-y-1">
+                <Label className="text-xs">Vent (km/h)</Label>
                 <Input 
                   type="number" 
                   value={newWindSpeed} 
                   onChange={(e) => setNewWindSpeed(e.target.value)} 
-                  placeholder="Ex: 50" 
+                  placeholder="50" 
                   min="0" 
                   max="300"
+                  className="h-8 text-xs"
                 />
-                <Button className="rounded-xl" onClick={() => setActiveTool("add-wind")}>Placer le vent</Button>
-                <div className="text-xs text-slate-600 dark:text-slate-300 cursor-default">La vitesse du vent sera affichée en km/h avec l'icône 💨.</div>
               </div>
             </div>
 
             <Separator />
 
-            <div className="space-y-3">
-              <div className="font-semibold text-sm">Éditer la sélection</div>
+            <div className="space-y-2">
+              <div className="font-semibold text-sm">Éditer</div>
               {selectedIds.length === 0 ? (
-                <div className="text-sm text-slate-500 cursor-default">Aucun élément sélectionné.</div>
+                <div className="text-xs text-slate-500 cursor-default">Aucun élément sélectionné</div>
               ) : selectedIds.length > 1 ? (
-                <div className="text-sm text-slate-700 cursor-default">
-                  <span className="font-semibold">{selectedIds.length} éléments sélectionnés</span>
-                  <div className="mt-2 text-xs text-slate-600">Glisse pour déplacer le groupe ensemble, ou clique pour sélectionner un seul élément.</div>
+                <div className="text-xs text-slate-700">
+                  <span className="font-semibold">{selectedIds.length} éléments</span>
                 </div>
               ) : selected?.kind === "icon" ? (
-                <div className="space-y-3">
-                  <div className="text-sm text-slate-700 cursor-default">
-                    Sélection : <span className="font-semibold">{selectedIcon?.label ?? "Icône"}</span>
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold">{selectedIcon?.label ?? "Icône"}</div>
+                  <div>
+                    <Label className="text-xs">Taille</Label>
+                    <Input type="range" min={24} max={80} value={selected.size} onChange={(e) => updateSelected({ size: Number(e.target.value) } as any)} className="h-6" />
                   </div>
-                  <Label className="text-xs">Taille</Label>
-                  <Input type="range" min={24} max={80} value={selected.size} onChange={(e) => updateSelected({ size: Number(e.target.value) } as any)} />
                 </div>
               ) : selected?.kind === "label" ? (
-                <div className="space-y-3">
-                  <Label className="text-xs">Texte</Label>
-                  <Input value={selected.text} onChange={(e) => updateSelected({ text: e.target.value } as any)} />
-                  <div>
-                    <Label className="text-xs">Taille du texte (px)</Label>
-                    <div className="mt-2 flex gap-2 items-center">
-                      <Input type="number" min={10} max={80} value={selected.fontSize} onChange={(e) => handleLabelFontSizeChange(Number(e.target.value))} className="w-20" />
-                      <Input type="range" min={10} max={80} value={selected.fontSize} onChange={(e) => handleLabelFontSizeChange(Number(e.target.value))} className="flex-1" />
+                <div className="space-y-2">
+                  <Input value={selected.text} onChange={(e) => updateSelected({ text: e.target.value } as any)} className="h-8 text-xs" placeholder="Texte" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs">Taille</Label>
+                      <Input type="number" min={10} max={80} value={selected.fontSize} onChange={(e) => handleLabelFontSizeChange(Number(e.target.value))} className="h-8 text-xs" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Couleur</Label>
+                      <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} className="h-8" />
                     </div>
                   </div>
-                  <Label className="text-xs">Couleur</Label>
-                  <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} />
-                  <div className="flex items-center gap-2">
-                    <input id="bg" type="checkbox" checked={selected.bg} onChange={(e) => updateSelected({ bg: e.target.checked } as any)} />
-                    <Label htmlFor="bg" className="text-sm">Fond blanc derrière</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input id="border" type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} />
-                    <Label htmlFor="border" className="text-sm">Bordure</Label>
+                  <div className="flex gap-3 text-xs">
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={selected.bg} onChange={(e) => updateSelected({ bg: e.target.checked } as any)} className="w-3 h-3" />
+                      Fond
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} className="w-3 h-3" />
+                      Bordure
+                    </label>
                   </div>
                 </div>
               ) : selected?.kind === "temp" ? (
-                <div className="space-y-3">
-                  <Label className="text-xs">Température</Label>
-                  <Input value={selected.value} onChange={(e) => updateSelected({ value: e.target.value } as any)} />
-                  <div>
-                    <Label className="text-xs">Taille (px)</Label>
-                    <div className="mt-2 flex gap-2 items-center">
-                      <Input type="number" min={10} max={80} value={selected.fontSize} onChange={(e) => handleTempFontSizeChange(Number(e.target.value))} className="w-20" />
-                      <Input type="range" min={10} max={80} value={selected.fontSize} onChange={(e) => handleTempFontSizeChange(Number(e.target.value))} className="flex-1" />
+                <div className="space-y-2">
+                  <Input value={selected.value} onChange={(e) => updateSelected({ value: e.target.value } as any)} className="h-8 text-xs" placeholder="Température" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs">Taille</Label>
+                      <Input type="number" min={10} max={80} value={selected.fontSize} onChange={(e) => handleTempFontSizeChange(Number(e.target.value))} className="h-8 text-xs" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Couleur</Label>
+                      <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} className="h-8" />
                     </div>
                   </div>
-                  <Label className="text-xs">Couleur</Label>
-                  <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} />
-                  <div className="flex items-center gap-2">
-                    <input id="tbg" type="checkbox" checked={selected.bg} onChange={(e) => updateSelected({ bg: e.target.checked } as any)} />
-                    <Label htmlFor="tbg" className="text-sm">Fond blanc derrière</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input id="tborder" type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} />
-                    <Label htmlFor="tborder" className="text-sm">Bordure</Label>
+                  <div className="flex gap-3 text-xs">
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={selected.bg} onChange={(e) => updateSelected({ bg: e.target.checked } as any)} className="w-3 h-3" />
+                      Fond
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} className="w-3 h-3" />
+                      Bordure
+                    </label>
                   </div>
                 </div>
               ) : selected?.kind === "wind" ? (
-                <div className="space-y-3">
-                  <Label className="text-xs">Vitesse du vent (km/h)</Label>
+                <div className="space-y-2">
                   <Input 
                     type="number" 
                     min={0} 
                     max={300} 
                     value={selected.speedKmh} 
                     onChange={(e) => updateSelected({ speedKmh: Number(e.target.value) } as any)} 
+                    className="h-8 text-xs"
+                    placeholder="Vitesse km/h"
                   />
-                  <div>
-                    <Label className="text-xs">Taille (px)</Label>
-                    <div className="mt-2 flex gap-2 items-center">
-                      <Input type="number" min={10} max={80} value={selected.fontSize} onChange={(e) => handleWindFontSizeChange(Number(e.target.value))} className="w-20" />
-                      <Input type="range" min={10} max={80} value={selected.fontSize} onChange={(e) => handleWindFontSizeChange(Number(e.target.value))} className="flex-1" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs">Taille</Label>
+                      <Input type="number" min={10} max={80} value={selected.fontSize} onChange={(e) => handleWindFontSizeChange(Number(e.target.value))} className="h-8 text-xs" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Couleur</Label>
+                      <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} className="h-8" />
                     </div>
                   </div>
-                  <Label className="text-xs">Couleur</Label>
-                  <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} />
-                  <div className="flex items-center gap-2">
-                    <input id="wbg" type="checkbox" checked={selected.bg} onChange={(e) => updateSelected({ bg: e.target.checked } as any)} />
-                    <Label htmlFor="wbg" className="text-sm">Fond blanc derrière</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input id="wborder" type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} />
-                    <Label htmlFor="wborder" className="text-sm">Bordure</Label>
+                  <div className="flex gap-3 text-xs">
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={selected.bg} onChange={(e) => updateSelected({ bg: e.target.checked } as any)} className="w-3 h-3" />
+                      Fond
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} className="w-3 h-3" />
+                      Bordure
+                    </label>
                   </div>
                 </div>
               ) : null}
