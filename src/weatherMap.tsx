@@ -801,19 +801,19 @@ export default function WeatherMapEditor() {
               <div className="text-lg font-semibold mb-2">Outils</div>
               <div className="grid grid-cols-3 gap-2">
                 <Button variant={activeTool === "select" ? "default" : "outline"} onClick={() => setActiveTool("select")} className="rounded-lg" size="sm">
-                  <MousePointer2 className="h-4 w-4" />
+                  <MousePointer2 className="h-4 w-4" /> Sélection
                 </Button>
                 <Button variant={activeTool === "add-icon" ? "default" : "outline"} onClick={() => setActiveTool("add-icon")} className="rounded-lg" size="sm">
-                  <ImageIcon className="h-4 w-4" />
+                  <ImageIcon className="h-4 w-4" />Icone
                 </Button>
                 <Button variant={activeTool === "add-label" ? "default" : "outline"} onClick={() => setActiveTool("add-label")} className="rounded-lg" size="sm">
-                  <Type className="h-4 w-4" />
+                  <Type className="h-4 w-4" /> Nom de ville
                 </Button>
                 <Button variant={activeTool === "add-temp" ? "default" : "outline"} onClick={() => setActiveTool("add-temp")} className="rounded-lg" size="sm">
-                  <Thermometer className="h-4 w-4" />
+                  <Thermometer className="h-4 w-4" /> Température
                 </Button>
                 <Button variant={activeTool === "add-wind" ? "default" : "outline"} onClick={() => setActiveTool("add-wind")} className="rounded-lg" size="sm">
-                  <Wind className="h-4 w-4" />
+                  <Wind className="h-4 w-4" /> Force du vent
                 </Button>
               </div>
             </div>
@@ -821,7 +821,7 @@ export default function WeatherMapEditor() {
             <Separator />
 
             <div className="space-y-2">
-              <div className="font-semibold text-sm">Icônes</div>
+              <div className="font-semibold text-sm">Evènement météorologique</div>
               <div className="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto overflow-x-hidden pr-1">
                 {getAvailableIcons().map((ic) => (
                   <div key={ic.id} className="relative">
@@ -851,7 +851,7 @@ export default function WeatherMapEditor() {
               </div>
 
               <details className="pt-2 border-t">
-                <summary className="text-xs font-semibold cursor-pointer hover:text-blue-600">+ Créer icône perso</summary>
+                <summary className="text-xs font-semibold cursor-pointer hover:text-blue-600">Créer icône perso</summary>
                 <div className="space-y-2 mt-2">
                   <details>
                     <summary className="text-xs cursor-pointer mb-1">Emojis 😊</summary>
