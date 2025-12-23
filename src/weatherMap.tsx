@@ -231,7 +231,7 @@ export default function WeatherMapEditor() {
       setBgId(bg.id);
       setBgUrl(bg.src);
       setAspectRatio("16 / 9");
-      setSelectedId(null);
+      clearSelection();
     } else {
       // For PNG images, load to get dimensions
       const img = new Image();
@@ -239,7 +239,7 @@ export default function WeatherMapEditor() {
         setAspectRatio(`${img.naturalWidth} / ${img.naturalHeight}`);
         setBgId(bg.id);
         setBgUrl(bg.src);
-        setSelectedId(null);
+        clearSelection();
       };
       img.src = bg.src;
     }
@@ -255,7 +255,7 @@ export default function WeatherMapEditor() {
         setAspectRatio(`${img.naturalWidth} / ${img.naturalHeight}`);
         setBgId("upload");
         setBgUrl(dataUrl);
-        setSelectedId(null);
+        clearSelection();
       };
       img.src = dataUrl;
     };
@@ -273,7 +273,7 @@ export default function WeatherMapEditor() {
   function addIconAtPct(x: number, y: number) {
     const el: IconElement = { id: uid("icon"), kind: "icon", iconId: chosenIconId, x, y, size: 44 };
     setElements((prev) => [...prev, el]);
-    setSelectedId(el.id);
+    setSelection(el.id);
   }
 
   function addLabelAtPct(x: number, y: number) {
@@ -289,7 +289,7 @@ export default function WeatherMapEditor() {
       border: false,
     };
     setElements((prev) => [...prev, el]);
-    setSelectedId(el.id);
+    setSelection(el.id);
   }
 
   function addTempAtPct(x: number, y: number) {
@@ -305,7 +305,7 @@ export default function WeatherMapEditor() {
       border: false,
     };
     setElements((prev) => [...prev, el]);
-    setSelectedId(el.id);
+    setSelection(el.id);
   }
 
   // Drag (en %)
@@ -446,6 +446,15 @@ export default function WeatherMapEditor() {
     clearSelection();
   }
 
+  function resetAllElements() {
+    if (elements.length === 0) return;
+    const confirmed = window.confirm("Êtes-vous sûr de vouloir supprimer tous les éléments de la carte ? Cette action ne peut pas être annulée.");
+    if (confirmed) {
+      setElements([]);
+      clearSelection();
+    }
+  }
+
   async function exportPng() {
     if (!stageRef.current) {
       console.error("No stage ref");
@@ -467,8 +476,8 @@ export default function WeatherMapEditor() {
   }
 
   function updateSelected(patch: Partial<ElementT>) {
-    if (!selectedId) return;
-    setElements((prev) => prev.map((e) => (e.id === selectedId ? ({ ...e, ...patch } as ElementT) : e)));
+    if (selectedIds.length !== 1) return;
+    setElements((prev) => prev.map((e) => (e.id === selectedIds[0] ? ({ ...e, ...patch } as ElementT) : e)));
   }
 
   function handleLabelFontSizeChange(value: number) {
@@ -532,6 +541,9 @@ export default function WeatherMapEditor() {
               </Button>
               <Button variant="outline" className="rounded-xl gap-2" onClick={deleteSelected} disabled={selectedIds.length === 0}>
                 <Trash2 className="h-4 w-4" /> Supprimer
+              </Button>
+              <Button variant="destructive" className="rounded-xl gap-2" onClick={resetAllElements} disabled={elements.length === 0}>
+                <Trash2 className="h-4 w-4" /> Réinitialiser tout
               </Button>
             </div>
 
