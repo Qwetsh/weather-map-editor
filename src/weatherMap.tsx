@@ -41,6 +41,16 @@ const ICONS = [
   { id: "cyclone", label: "Cyclone", glyph: "🌀" },
 ];
 
+// Emoji picker for custom icons
+const EMOJI_PICKER = [
+  "⭐", "❤️", "💚", "💙", "💜", "🌟", "✨", "💫",
+  "🌈", "☔", "🌤️", "🌥️", "⛅", "🌦️", "☃️", "❄️",
+  "🌡️", "🧊", "💧", "💦", "🌊", "🔥", "💨", "🌀",
+  "⚡", "🌩️", "🌪️", "🌫️", "☁️", "🌬️", "🍃", "🌾",
+  "🏔️", "🗻", "🏖️", "🏝️", "🌋", "⛰️", "🏕️", "🏞️",
+  "🌍", "🌎", "🌏", "🌐", "🗺️", "🧭", "📍", "📌",
+];
+
 function uid(prefix = "el") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
@@ -154,6 +164,7 @@ export default function WeatherMapEditor() {
   const [customIcons, setCustomIcons] = useState<CustomIcon[]>([]);
   const [newCustomIconGlyph, setNewCustomIconGlyph] = useState("⭐");
   const [newCustomIconLabel, setNewCustomIconLabel] = useState("Personnalisé");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const [newLabelText, setNewLabelText] = useState("Paris");
   const [newTempText, setNewTempText] = useState("42");
@@ -602,7 +613,7 @@ export default function WeatherMapEditor() {
                   const baseClass = "absolute select-none cursor-move" + (isSelItem ? " border-2 border-dashed border-indigo-500 rounded-lg" : "");
 
                   if (el.kind === "icon") {
-                    const icon = ICONS.find((i) => i.id === el.iconId) ?? ICONS[0];
+                    const icon = getAvailableIcons().find((i) => i.id === el.iconId) ?? ICONS[0];
                     return (
                       <div
                         key={el.id}
@@ -665,7 +676,7 @@ export default function WeatherMapEditor() {
                         className="absolute pointer-events-none opacity-60 select-none"
                         style={{ left: `${ghost.x}%`, top: `${ghost.y}%`, transform: "translate(-50%, -50%)", fontSize: 44, padding: 4 }}
                       >
-                        <span>{ICONS.find((i) => i.id === chosenIconId)?.glyph ?? "?"}</span>
+                        <span>{getAvailableIcons().find((i) => i.id === chosenIconId)?.glyph ?? "?"}</span>
                       </div>
                     )}
                     {activeTool === "add-label" && (
@@ -737,7 +748,7 @@ export default function WeatherMapEditor() {
 
             <div className="space-y-3">
               <div className="font-semibold text-sm">Ajouter une icône</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto overflow-x-hidden pr-1">
                 {getAvailableIcons().map((ic) => (
                   <div key={ic.id} className="relative">
                     <Button
@@ -766,6 +777,38 @@ export default function WeatherMapEditor() {
 
               <div className="space-y-2 pt-2 border-t">
                 <Label className="text-xs font-semibold">Créer une icône personnalisée</Label>
+                
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Choisir un emoji</Label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                      className="h-6 px-2 text-xs"
+                    >
+                      {showEmojiPicker ? 'Masquer' : 'Afficher'} 😊
+                    </Button>
+                  </div>
+                  {showEmojiPicker && (
+                    <div className="grid grid-cols-8 gap-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-lg max-h-32 overflow-y-auto">
+                      {EMOJI_PICKER.map((emoji, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setNewCustomIconGlyph(emoji)}
+                          className={`text-xl p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors ${
+                            newCustomIconGlyph === emoji ? 'bg-slate-300 dark:bg-slate-500 ring-2 ring-blue-500' : ''
+                          }`}
+                          title={emoji}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex gap-2">
                   <Input
                     type="text"
@@ -773,7 +816,7 @@ export default function WeatherMapEditor() {
                     value={newCustomIconGlyph}
                     onChange={(e) => setNewCustomIconGlyph(e.target.value)}
                     maxLength={2}
-                    className="w-16 text-center"
+                    className="w-16 text-center text-xl"
                   />
                   <Input
                     type="text"
