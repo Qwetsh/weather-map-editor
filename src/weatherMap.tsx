@@ -659,7 +659,7 @@ export default function WeatherMapEditor() {
                 )}
               </div>
 
-              <div className="mt-3 text-xs text-slate-600 cursor-default">
+              <div className="mt-3 text-xs text-slate-600 dark:text-slate-300 cursor-default">
                 <span className="font-semibold">Astuce :</span> clique sur « Icône / Ville / Température », puis clique sur la carte. Déplace en glissant. Clique sur un élément pour l'éditer. Glisse pour sélectionner plusieurs éléments.
               </div>
             </div>
@@ -685,7 +685,7 @@ export default function WeatherMapEditor() {
             </div>
 
             <div className="text-lg font-semibold">Panneau de contrôle</div>
-            <div className="text-sm text-slate-600 cursor-default">Choisis ce que tu veux ajouter, puis clique sur la carte.</div>
+            <div className="text-sm text-slate-600 dark:text-slate-300 cursor-default">Choisis ce que tu veux ajouter, puis clique sur la carte.</div>
 
             <Separator />
 
@@ -728,7 +728,7 @@ export default function WeatherMapEditor() {
                 <Label className="text-xs">Valeur (ex : 42 ou 42 / +4)</Label>
                 <Input value={newTempText} onChange={(e) => setNewTempText(e.target.value)} placeholder="Ex: 42 / +4" />
                 <Button className="rounded-xl" onClick={() => setActiveTool("add-temp")}>Placer la température</Button>
-                <div className="text-xs text-slate-600 cursor-default">Astuce : « 42 / +4 » = 42°C et anomalie +4°C.</div>
+                <div className="text-xs text-slate-600 dark:text-slate-300 cursor-default">Astuce : « 42 / +4 » = 42°C et anomalie +4°C.</div>
               </div>
             </div>
 
