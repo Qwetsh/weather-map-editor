@@ -413,20 +413,6 @@ export default function WeatherMapEditor() {
                 </Button>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2 mb-4">
-              <Button variant={activeTool === "select" ? "default" : "outline"} onClick={() => setActiveTool("select")} className="rounded-xl gap-2">
-                <MousePointer2 className="h-4 w-4" /> Sélection
-              </Button>
-              <Button variant={activeTool === "add-icon" ? "default" : "outline"} onClick={() => setActiveTool("add-icon")} className="rounded-xl gap-2">
-                <ImageIcon className="h-4 w-4" /> Icône
-              </Button>
-              <Button variant={activeTool === "add-label" ? "default" : "outline"} onClick={() => setActiveTool("add-label")} className="rounded-xl gap-2">
-                <Type className="h-4 w-4" /> Ville
-              </Button>
-              <Button variant={activeTool === "add-temp" ? "default" : "outline"} onClick={() => setActiveTool("add-temp")} className="rounded-xl gap-2">
-                <Thermometer className="h-4 w-4" /> Température
-              </Button>
-            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
               <div>
@@ -579,6 +565,21 @@ export default function WeatherMapEditor() {
         {/* Droite : panneau */}
         <Card className="rounded-2xl shadow-sm min-w-0">
           <CardContent className="p-4 md:p-5 space-y-4">
+            <div className="flex flex-wrap gap-2 mb-2">
+              <Button variant={activeTool === "select" ? "default" : "outline"} onClick={() => setActiveTool("select")} className="rounded-xl gap-2">
+                <MousePointer2 className="h-4 w-4" /> Sélection
+              </Button>
+              <Button variant={activeTool === "add-icon" ? "default" : "outline"} onClick={() => setActiveTool("add-icon")} className="rounded-xl gap-2">
+                <ImageIcon className="h-4 w-4" /> Icône
+              </Button>
+              <Button variant={activeTool === "add-label" ? "default" : "outline"} onClick={() => setActiveTool("add-label")} className="rounded-xl gap-2">
+                <Type className="h-4 w-4" /> Ville
+              </Button>
+              <Button variant={activeTool === "add-temp" ? "default" : "outline"} onClick={() => setActiveTool("add-temp")} className="rounded-xl gap-2">
+                <Thermometer className="h-4 w-4" /> Température
+              </Button>
+            </div>
+
             <div className="text-lg font-semibold">Panneau de contrôle</div>
             <div className="text-sm text-slate-600 cursor-default">Choisis ce que tu veux ajouter, puis clique sur la carte.</div>
 
