@@ -149,6 +149,12 @@ export default function WeatherMapEditor() {
   const [activeTool, setActiveTool] = useState<"select" | "add-icon" | "add-label" | "add-temp">("select");
   const [chosenIconId, setChosenIconId] = useState(ICONS[0].id);
 
+  // Custom icons (session-only)
+  type CustomIcon = { id: string; label: string; glyph: string };
+  const [customIcons, setCustomIcons] = useState<CustomIcon[]>([]);
+  const [newCustomIconGlyph, setNewCustomIconGlyph] = useState("⭐");
+  const [newCustomIconLabel, setNewCustomIconLabel] = useState("Personnalisé");
+
   const [newLabelText, setNewLabelText] = useState("Paris");
   const [newTempText, setNewTempText] = useState("42");
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -501,6 +507,27 @@ export default function WeatherMapEditor() {
     updateSelected({ fontSize: clamped } as any);
   }
 
+  function addCustomIcon() {
+    if (!newCustomIconGlyph.trim() || !newCustomIconLabel.trim()) return;
+    const customIcon: CustomIcon = {
+      id: uid("custom-icon"),
+      label: newCustomIconLabel.trim(),
+      glyph: newCustomIconGlyph.trim(),
+    };
+    setCustomIcons((prev) => [...prev, customIcon]);
+    // Reset form
+    setNewCustomIconLabel("Personnalisé");
+    setNewCustomIconGlyph("⭐");
+  }
+
+  function deleteCustomIcon(id: string) {
+    setCustomIcons((prev) => prev.filter((ic) => ic.id !== id));
+  }
+
+  function getAvailableIcons() {
+    return [...ICONS, ...customIcons];
+  }
+
   return (
     <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-900 p-4 md:p-6">
       <div className="mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -711,20 +738,54 @@ export default function WeatherMapEditor() {
             <div className="space-y-3">
               <div className="font-semibold text-sm">Ajouter une icône</div>
               <div className="grid grid-cols-2 gap-2">
-                {ICONS.map((ic) => (
-                  <Button
-                    key={ic.id}
-                    variant={chosenIconId === ic.id ? "default" : "outline"}
-                    className="justify-start rounded-xl gap-2"
-                    onClick={() => {
-                      setChosenIconId(ic.id);
-                      setActiveTool("add-icon");
-                    }}
-                  >
-                    <span className="text-lg">{ic.glyph}</span>
-                    <span className="text-xs">{ic.label}</span>
-                  </Button>
+                {getAvailableIcons().map((ic) => (
+                  <div key={ic.id} className="relative">
+                    <Button
+                      variant={chosenIconId === ic.id ? "default" : "outline"}
+                      className="justify-start rounded-xl gap-2 w-full"
+                      onClick={() => {
+                        setChosenIconId(ic.id);
+                        setActiveTool("add-icon");
+                      }}
+                    >
+                      <span className="text-lg">{ic.glyph}</span>
+                      <span className="text-xs flex-1 text-left truncate">{ic.label}</span>
+                    </Button>
+                    {customIcons.find((ci) => ci.id === ic.id) && (
+                      <button
+                        onClick={() => deleteCustomIcon(ic.id)}
+                        className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center hover:bg-red-600"
+                        title="Supprimer l'icône"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 ))}
+              </div>
+
+              <div className="space-y-2 pt-2 border-t">
+                <Label className="text-xs font-semibold">Créer une icône personnalisée</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    placeholder="Emoji ou caractère"
+                    value={newCustomIconGlyph}
+                    onChange={(e) => setNewCustomIconGlyph(e.target.value)}
+                    maxLength={2}
+                    className="w-16 text-center"
+                  />
+                  <Input
+                    type="text"
+                    placeholder="Nom"
+                    value={newCustomIconLabel}
+                    onChange={(e) => setNewCustomIconLabel(e.target.value)}
+                    className="flex-1"
+                  />
+                </div>
+                <Button className="w-full rounded-xl text-xs" onClick={addCustomIcon}>
+                  + Ajouter
+                </Button>
               </div>
             </div>
 
