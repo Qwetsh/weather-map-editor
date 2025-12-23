@@ -318,6 +318,13 @@ export default function WeatherMapEditor() {
       else if (activeTool === "add-label") addLabelAtPct(ghost.x, ghost.y);
       else addTempAtPct(ghost.x, ghost.y);
       setGhost(null);
+      
+      // Shift+click for icons: keep placement mode active to place multiple icons
+      if (activeTool === "add-icon" && e.shiftKey) {
+        // Keep placement mode active, ghost will be recreated on next mouse move
+        return;
+      }
+      
       setActiveTool("select");
       return;
     }
@@ -672,7 +679,7 @@ export default function WeatherMapEditor() {
               </div>
 
               <div className="mt-3 text-xs text-slate-600 dark:text-slate-300 cursor-default">
-                <span className="font-semibold">Astuce :</span> clique sur « Icône / Ville / Température », puis clique sur la carte. Déplace en glissant. Clique sur un élément pour l'éditer. Glisse pour sélectionner plusieurs éléments.
+                <span className="font-semibold">Astuce :</span> clique sur « Icône / Ville / Température », puis clique sur la carte. Déplace en glissant. Clique sur un élément pour l'éditer. Glisse pour sélectionner plusieurs éléments. Shift+clic sur les icônes pour en placer plusieurs d'affilée.
               </div>
             </div>
           </CardContent>
