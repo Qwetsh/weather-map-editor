@@ -133,6 +133,8 @@ type ElementT = IconElement | LabelElement | TempElement;
 
 export default function WeatherMapEditor() {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  // Ghost preview state
+  const [ghost, setGhost] = useState<null | { x: number; y: number }>(null);
 
   // Fond: intégré par défaut
   const [bgId, setBgId] = useState(BUILTIN_BACKGROUNDS[0].id);
@@ -148,6 +150,14 @@ export default function WeatherMapEditor() {
   const [newLabelText, setNewLabelText] = useState("Paris");
   const [newTempText, setNewTempText] = useState("42");
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [lastLabelFontSize, setLastLabelFontSize] = useState(() => {
+    const saved = localStorage.getItem('lastLabelFontSize');
+    return saved ? parseInt(saved, 10) : 20;
+  });
+  const [lastTempFontSize, setLastTempFontSize] = useState(() => {
+    const saved = localStorage.getItem('lastTempFontSize');
+    return saved ? parseInt(saved, 10) : 20;
+  });
 
   const selected = useMemo(
     () => elements.find((e) => e.id === selectedId) ?? null,
@@ -240,10 +250,10 @@ export default function WeatherMapEditor() {
       text: newLabelText.trim() || "Ville",
       x,
       y,
-      fontSize: 20,
+      fontSize: lastLabelFontSize,
       color: "#111827",
-      bg: true,
-      border: true,
+      bg: false,
+      border: false,
     };
     setElements((prev) => [...prev, el]);
     setSelectedId(el.id);
@@ -256,10 +266,10 @@ export default function WeatherMapEditor() {
       value: (newTempText.trim() || "25").replace(/\s+/g, " "),
       x,
       y,
-      fontSize: 20,
+      fontSize: lastTempFontSize,
       color: "#0f172a",
-      bg: true,
-      border: true,
+      bg: false,
+      border: false,
     };
     setElements((prev) => [...prev, el]);
     setSelectedId(el.id);
@@ -270,14 +280,50 @@ export default function WeatherMapEditor() {
 
   function onStagePointerDown(e: React.PointerEvent) {
     if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp") {
-      const p = stagePointPctFromEvent(e);
-      if (activeTool === "add-icon") addIconAtPct(p.xPct, p.yPct);
-      else if (activeTool === "add-label") addLabelAtPct(p.xPct, p.yPct);
-      else addTempAtPct(p.xPct, p.yPct);
+      if (!ghost) return;
+      if (activeTool === "add-icon") addIconAtPct(ghost.x, ghost.y);
+      else if (activeTool === "add-label") addLabelAtPct(ghost.x, ghost.y);
+      else addTempAtPct(ghost.x, ghost.y);
+      setGhost(null);
+      setActiveTool("select");
       return;
     }
     setSelectedId(null);
   }
+
+  // Mouse move for ghost preview
+  function onStagePointerMove(e: React.PointerEvent) {
+    if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp") {
+      const p = stagePointPctFromEvent(e);
+      setGhost({ x: p.xPct, y: p.yPct });
+    }
+  }
+
+  // Mouse leave: clear ghost
+  function onStagePointerLeave() {
+    setGhost(null);
+  }
+
+  // Right click to cancel
+  function onStageContextMenu(e: React.MouseEvent) {
+    if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp") {
+      e.preventDefault();
+      setGhost(null);
+      setActiveTool("select");
+    }
+  }
+
+  // Escape key to cancel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp") && e.key === "Escape") {
+        setGhost(null);
+        setActiveTool("select");
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [activeTool]);
 
   function onElementPointerDown(e: React.PointerEvent, id: string) {
     e.stopPropagation();
@@ -333,6 +379,20 @@ export default function WeatherMapEditor() {
   function updateSelected(patch: Partial<ElementT>) {
     if (!selectedId) return;
     setElements((prev) => prev.map((e) => (e.id === selectedId ? ({ ...e, ...patch } as ElementT) : e)));
+  }
+
+  function handleLabelFontSizeChange(value: number) {
+    const clamped = clamp(value, 10, 80);
+    setLastLabelFontSize(clamped);
+    localStorage.setItem('lastLabelFontSize', String(clamped));
+    updateSelected({ fontSize: clamped } as any);
+  }
+
+  function handleTempFontSizeChange(value: number) {
+    const clamped = clamp(value, 10, 80);
+    setLastTempFontSize(clamped);
+    localStorage.setItem('lastTempFontSize', String(clamped));
+    updateSelected({ fontSize: clamped } as any);
   }
 
   return (
@@ -404,6 +464,9 @@ export default function WeatherMapEditor() {
               <div
                 ref={stageRef}
                 onPointerDown={onStagePointerDown}
+                onPointerMove={onStagePointerMove}
+                onPointerLeave={onStagePointerLeave}
+                onContextMenu={onStageContextMenu}
                 className="relative w-full overflow-hidden rounded-xl border bg-slate-100 dark:bg-slate-700"
                 style={{ aspectRatio }}
               >
@@ -470,6 +533,40 @@ export default function WeatherMapEditor() {
                     </div>
                   );
                 })}
+
+                {/* Ghost preview */}
+                {ghost && (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp") && (
+                  <>
+                    {activeTool === "add-icon" && (
+                      <div
+                        className="absolute pointer-events-none opacity-60 select-none"
+                        style={{ left: `${ghost.x}%`, top: `${ghost.y}%`, transform: "translate(-50%, -50%)", fontSize: 44, padding: 4 }}
+                      >
+                        <span>{ICONS.find((i) => i.id === chosenIconId)?.glyph ?? "?"}</span>
+                      </div>
+                    )}
+                    {activeTool === "add-label" && (
+                      <div
+                        className="absolute pointer-events-none opacity-60 select-none"
+                        style={{ left: `${ghost.x}%`, top: `${ghost.y}%`, transform: "translate(-50%, -50%)" }}
+                      >
+                        <div className="px-2 py-1 rounded-lg bg-white/85 backdrop-blur border shadow-sm" style={{ color: "#111827", fontSize: 20, fontWeight: 700 }}>
+                          {newLabelText.trim() || "Ville"}
+                        </div>
+                      </div>
+                    )}
+                    {activeTool === "add-temp" && (
+                      <div
+                        className="absolute pointer-events-none opacity-60 select-none"
+                        style={{ left: `${ghost.x}%`, top: `${ghost.y}%`, transform: "translate(-50%, -50%)" }}
+                      >
+                        <div className="px-2 py-1 rounded-xl bg-white/90 border shadow-sm" style={{ color: "#0f172a", fontSize: 20, fontWeight: 800 }}>
+                          {(newTempText.trim() || "25").includes("°") ? newTempText.trim() || "25" : `${newTempText.trim() || "25"}°C`}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               <div className="mt-3 text-xs text-slate-600 cursor-default">
@@ -548,8 +645,13 @@ export default function WeatherMapEditor() {
                 <div className="space-y-3">
                   <Label className="text-xs">Texte</Label>
                   <Input value={selected.text} onChange={(e) => updateSelected({ text: e.target.value } as any)} />
-                  <Label className="text-xs">Taille du texte</Label>
-                  <Input type="range" min={12} max={40} value={selected.fontSize} onChange={(e) => updateSelected({ fontSize: Number(e.target.value) } as any)} />
+                  <div>
+                    <Label className="text-xs">Taille du texte (px)</Label>
+                    <div className="mt-2 flex gap-2 items-center">
+                      <Input type="number" min={10} max={80} value={selected.fontSize} onChange={(e) => handleLabelFontSizeChange(Number(e.target.value))} className="w-20" />
+                      <Input type="range" min={10} max={80} value={selected.fontSize} onChange={(e) => handleLabelFontSizeChange(Number(e.target.value))} className="flex-1" />
+                    </div>
+                  </div>
                   <Label className="text-xs">Couleur</Label>
                   <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} />
                   <div className="flex items-center gap-2">
@@ -565,8 +667,13 @@ export default function WeatherMapEditor() {
                 <div className="space-y-3">
                   <Label className="text-xs">Température</Label>
                   <Input value={selected.value} onChange={(e) => updateSelected({ value: e.target.value } as any)} />
-                  <Label className="text-xs">Taille</Label>
-                  <Input type="range" min={12} max={42} value={selected.fontSize} onChange={(e) => updateSelected({ fontSize: Number(e.target.value) } as any)} />
+                  <div>
+                    <Label className="text-xs">Taille (px)</Label>
+                    <div className="mt-2 flex gap-2 items-center">
+                      <Input type="number" min={10} max={80} value={selected.fontSize} onChange={(e) => handleTempFontSizeChange(Number(e.target.value))} className="w-20" />
+                      <Input type="range" min={10} max={80} value={selected.fontSize} onChange={(e) => handleTempFontSizeChange(Number(e.target.value))} className="flex-1" />
+                    </div>
+                  </div>
                   <Label className="text-xs">Couleur</Label>
                   <Input type="color" value={selected.color} onChange={(e) => updateSelected({ color: e.target.value } as any)} />
                   <div className="flex items-center gap-2">
