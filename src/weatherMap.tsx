@@ -142,7 +142,9 @@ export default function WeatherMapEditor() {
   const [aspectRatio, setAspectRatio] = useState("16 / 9");
 
   const [elements, setElements] = useState<ElementT[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectionBox, setSelectionBox] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(null);
+  const [isDrawingSelection, setIsDrawingSelection] = useState(false);
 
   const [activeTool, setActiveTool] = useState<"select" | "add-icon" | "add-label" | "add-temp">("select");
   const [chosenIconId, setChosenIconId] = useState(ICONS[0].id);
@@ -160,22 +162,53 @@ export default function WeatherMapEditor() {
   });
 
   const selected = useMemo(
-    () => elements.find((e) => e.id === selectedId) ?? null,
-    [elements, selectedId]
+    () => (selectedIds.length === 1 ? elements.find((e) => e.id === selectedIds[0]) ?? null : null),
+    [elements, selectedIds]
   );
 
   const selectedIcon = selected?.kind === "icon" ? ICONS.find((i) => i.id === selected.iconId) : null;
 
+  // Multi-select helpers
+  function toggleSelection(id: string) {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+
+  function setSelection(id: string | string[]) {
+    setSelectedIds(Array.isArray(id) ? id : [id]);
+  }
+
+  function clearSelection() {
+    setSelectedIds([]);
+  }
+
+  function isSelected(id: string) {
+    return selectedIds.includes(id);
+  }
+
+  function pointInBounds(px: number, py: number, ex: number, ey: number, size: number = 30): boolean {
+    return Math.abs(px - ex) <= size && Math.abs(py - ey) <= size;
+  }
+
+  function elementsInBox(box: { x0: number; y0: number; x1: number; y1: number }): string[] {
+    const minX = Math.min(box.x0, box.x1);
+    const maxX = Math.max(box.x0, box.x1);
+    const minY = Math.min(box.y0, box.y1);
+    const maxY = Math.max(box.y0, box.y1);
+    return elements
+      .filter((el) => el.x >= minX && el.x <= maxX && el.y >= minY && el.y <= maxY)
+      .map((el) => el.id);
+  }
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && selectedId) {
+      if (e.key === 'Delete' && selectedIds.length > 0) {
         deleteSelected();
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId]);
+  }, [selectedIds]);
 
   // Theme initialization
   useEffect(() => {
@@ -276,7 +309,7 @@ export default function WeatherMapEditor() {
   }
 
   // Drag (en %)
-  const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
+  const dragRef = useRef<{ ids: string[]; dx: number; dy: number } | null>(null);
 
   function onStagePointerDown(e: React.PointerEvent) {
     if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp") {
@@ -288,20 +321,49 @@ export default function WeatherMapEditor() {
       setActiveTool("select");
       return;
     }
-    setSelectedId(null);
+    
+    // Selection box dragging
+    const p = stagePointPctFromEvent(e);
+    setIsDrawingSelection(true);
+    setSelectionBox({ x0: p.xPct, y0: p.yPct, x1: p.xPct, y1: p.yPct });
   }
 
-  // Mouse move for ghost preview
+  // Mouse move for ghost preview and selection box
   function onStagePointerMove(e: React.PointerEvent) {
     if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp") {
       const p = stagePointPctFromEvent(e);
       setGhost({ x: p.xPct, y: p.yPct });
+      return;
+    }
+
+    // Selection box drawing
+    if (isDrawingSelection && selectionBox) {
+      const p = stagePointPctFromEvent(e);
+      setSelectionBox((prev) => prev ? { ...prev, x1: p.xPct, y1: p.yPct } : null);
     }
   }
 
   // Mouse leave: clear ghost
   function onStagePointerLeave() {
     setGhost(null);
+    if (isDrawingSelection) {
+      setIsDrawingSelection(false);
+      setSelectionBox(null);
+    }
+  }
+
+  // Mouse up: finalize selection box
+  function onStagePointerUp(e: React.PointerEvent) {
+    if (isDrawingSelection && selectionBox) {
+      const selected = elementsInBox(selectionBox);
+      if (selected.length > 0) {
+        setSelection(selected);
+      } else {
+        clearSelection();
+      }
+      setIsDrawingSelection(false);
+      setSelectionBox(null);
+    }
   }
 
   // Right click to cancel
@@ -327,33 +389,61 @@ export default function WeatherMapEditor() {
 
   function onElementPointerDown(e: React.PointerEvent, id: string) {
     e.stopPropagation();
-    setSelectedId(id);
+    
+    // Multi-select with Shift or Ctrl
+    if (e.shiftKey || e.ctrlKey) {
+      toggleSelection(id);
+    } else {
+      setSelection(id);
+    }
+    
     const p = stagePointPctFromEvent(e);
-    const el = elements.find((x) => x.id === id);
-    if (!el) return;
-    dragRef.current = { id, dx: p.xPct - el.x, dy: p.yPct - el.y };
+    const selectedEls = selectedIds.includes(id) ? selectedIds : [id];
+    dragRef.current = { 
+      ids: selectedEls, 
+      dx: p.xPct - (elements.find((x) => x.id === selectedEls[0])?.x ?? 0), 
+      dy: p.yPct - (elements.find((x) => x.id === selectedEls[0])?.y ?? 0) 
+    };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
   function onElementPointerMove(e: React.PointerEvent, id: string) {
     const d = dragRef.current;
-    if (!d || d.id !== id) return;
+    if (!d || !d.ids.includes(id)) return;
     e.stopPropagation();
     const p = stagePointPctFromEvent(e);
-    const nx = clamp(p.xPct - d.dx, 0, 100);
-    const ny = clamp(p.yPct - d.dy, 0, 100);
-    setElements((prev) => prev.map((el) => (el.id === id ? { ...el, x: nx, y: ny } : el)));
+    
+    // Calculate offset from first selected element
+    const firstEl = elements.find((x) => x.id === d.ids[0]);
+    if (!firstEl) return;
+    
+    const offsetX = p.xPct - d.dx - firstEl.x;
+    const offsetY = p.yPct - d.dy - firstEl.y;
+    
+    // Move all selected elements by the same offset
+    setElements((prev) =>
+      prev.map((el) => {
+        if (d.ids.includes(el.id)) {
+          return {
+            ...el,
+            x: clamp(el.x + offsetX, 0, 100),
+            y: clamp(el.y + offsetY, 0, 100),
+          };
+        }
+        return el;
+      })
+    );
   }
 
   function onElementPointerUp(_e: React.PointerEvent, id: string) {
     const d = dragRef.current;
-    if (d && d.id === id) dragRef.current = null;
+    if (d && d.ids.includes(id)) dragRef.current = null;
   }
 
   function deleteSelected() {
-    if (!selectedId) return;
-    setElements((prev) => prev.filter((e) => e.id !== selectedId));
-    setSelectedId(null);
+    if (selectedIds.length === 0) return;
+    setElements((prev) => prev.filter((e) => !selectedIds.includes(e.id)));
+    clearSelection();
   }
 
   async function exportPng() {
@@ -440,7 +530,7 @@ export default function WeatherMapEditor() {
               <Button className="rounded-xl gap-2" onClick={exportPng}>
                 <Download className="h-4 w-4" /> Export PNG
               </Button>
-              <Button variant="outline" className="rounded-xl gap-2" onClick={deleteSelected} disabled={!selectedId}>
+              <Button variant="outline" className="rounded-xl gap-2" onClick={deleteSelected} disabled={selectedIds.length === 0}>
                 <Trash2 className="h-4 w-4" /> Supprimer
               </Button>
             </div>
@@ -452,6 +542,7 @@ export default function WeatherMapEditor() {
                 onPointerDown={onStagePointerDown}
                 onPointerMove={onStagePointerMove}
                 onPointerLeave={onStagePointerLeave}
+                onPointerUp={onStagePointerUp}
                 onContextMenu={onStageContextMenu}
                 className="relative w-full overflow-hidden rounded-xl border bg-slate-100 dark:bg-slate-700"
                 style={{ aspectRatio }}
@@ -461,8 +552,8 @@ export default function WeatherMapEditor() {
                 ) : null}
 
                 {elements.map((el) => {
-                  const isSel = el.id === selectedId;
-                  const baseClass = "absolute select-none cursor-move" + (isSel ? " border-2 border-dashed border-indigo-500 rounded-lg" : "");
+                  const isSelItem = isSelected(el.id);
+                  const baseClass = "absolute select-none cursor-move" + (isSelItem ? " border-2 border-dashed border-indigo-500 rounded-lg" : "");
 
                   if (el.kind === "icon") {
                     const icon = ICONS.find((i) => i.id === el.iconId) ?? ICONS[0];
@@ -553,10 +644,23 @@ export default function WeatherMapEditor() {
                     )}
                   </>
                 )}
+
+                {/* Selection box */}
+                {selectionBox && isDrawingSelection && (
+                  <div
+                    className="absolute border-2 border-dashed border-blue-500 bg-blue-500/10 pointer-events-none"
+                    style={{
+                      left: `${Math.min(selectionBox.x0, selectionBox.x1)}%`,
+                      top: `${Math.min(selectionBox.y0, selectionBox.y1)}%`,
+                      width: `${Math.abs(selectionBox.x1 - selectionBox.x0)}%`,
+                      height: `${Math.abs(selectionBox.y1 - selectionBox.y0)}%`,
+                    }}
+                  />
+                )}
               </div>
 
               <div className="mt-3 text-xs text-slate-600 cursor-default">
-                <span className="font-semibold">Astuce :</span> clique sur « Icône / Ville / Température », puis clique sur la carte. Déplace en glissant. Clique sur un élément pour l’éditer.
+                <span className="font-semibold">Astuce :</span> clique sur « Icône / Ville / Température », puis clique sur la carte. Déplace en glissant. Clique sur un élément pour l'éditer. Glisse pour sélectionner plusieurs éléments.
               </div>
             </div>
           </CardContent>
@@ -632,9 +736,14 @@ export default function WeatherMapEditor() {
 
             <div className="space-y-3">
               <div className="font-semibold text-sm">Éditer la sélection</div>
-              {!selected ? (
+              {selectedIds.length === 0 ? (
                 <div className="text-sm text-slate-500 cursor-default">Aucun élément sélectionné.</div>
-              ) : selected.kind === "icon" ? (
+              ) : selectedIds.length > 1 ? (
+                <div className="text-sm text-slate-700 cursor-default">
+                  <span className="font-semibold">{selectedIds.length} éléments sélectionnés</span>
+                  <div className="mt-2 text-xs text-slate-600">Glisse pour déplacer le groupe ensemble, ou clique pour sélectionner un seul élément.</div>
+                </div>
+              ) : selected?.kind === "icon" ? (
                 <div className="space-y-3">
                   <div className="text-sm text-slate-700 cursor-default">
                     Sélection : <span className="font-semibold">{selectedIcon?.label ?? "Icône"}</span>
@@ -642,7 +751,7 @@ export default function WeatherMapEditor() {
                   <Label className="text-xs">Taille</Label>
                   <Input type="range" min={24} max={80} value={selected.size} onChange={(e) => updateSelected({ size: Number(e.target.value) } as any)} />
                 </div>
-              ) : selected.kind === "label" ? (
+              ) : selected?.kind === "label" ? (
                 <div className="space-y-3">
                   <Label className="text-xs">Texte</Label>
                   <Input value={selected.text} onChange={(e) => updateSelected({ text: e.target.value } as any)} />
