@@ -5,7 +5,8 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/weatherMap/',
+  // GitHub Pages: use repo name as base path
+  base: '/weather-map-editor/',
   build: {
     outDir: 'docs',
   },
