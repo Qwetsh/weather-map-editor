@@ -340,9 +340,7 @@ export default function WeatherMapEditor() {
   const [newCustomIconLabel, setNewCustomIconLabel] = useState("Personnalisé");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
-  const [newLabelText, setNewLabelText] = useState("Paris");
-  const [newTempText, setNewTempText] = useState("42");
-  const [newWindSpeed, setNewWindSpeed] = useState("50");
+  // Removed quick-input defaults; new items will open edit modal
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [lastLabelFontSize, setLastLabelFontSize] = useState(() => {
     const saved = localStorage.getItem('lastLabelFontSize');
@@ -737,7 +735,7 @@ export default function WeatherMapEditor() {
     const el: LabelElement = {
       id: uid("label"),
       kind: "label",
-      text: newLabelText.trim() || "Ville",
+      text: "Ville",
       x,
       y,
       fontSize: lastLabelFontSize,
@@ -748,13 +746,14 @@ export default function WeatherMapEditor() {
     };
     setElements((prev) => [...prev, el]);
     setSelection(el.id);
+    setEditModal({ elementId: el.id });
   }
 
   function addTempAtPct(x: number, y: number) {
     const el: TempElement = {
       id: uid("temp"),
       kind: "temp",
-      value: (newTempText.trim() || "25").replace(/\s+/g, " "),
+      value: "25",
       x,
       y,
       fontSize: lastTempFontSize,
@@ -765,13 +764,14 @@ export default function WeatherMapEditor() {
     };
     setElements((prev) => [...prev, el]);
     setSelection(el.id);
+    setEditModal({ elementId: el.id });
   }
 
   function addWindAtPct(x: number, y: number) {
     const el: WindElement = {
       id: uid("wind"),
       kind: "wind",
-      speedKmh: parseInt(newWindSpeed.trim() || "50", 10),
+      speedKmh: 50,
       x,
       y,
       fontSize: lastWindFontSize,
@@ -782,6 +782,7 @@ export default function WeatherMapEditor() {
     };
     setElements((prev) => [...prev, el]);
     setSelection(el.id);
+    setEditModal({ elementId: el.id });
   }
 
   // Drag (en %)
@@ -1179,9 +1180,9 @@ export default function WeatherMapEditor() {
 
   return (
     <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-900 p-4 md:p-6">
-      <div className="mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="mx-auto w-full grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Gauche : carte */}
-        <Card className="md:col-span-1 rounded-2xl shadow-sm min-w-0">
+        <Card className="md:col-span-2 md:order-2 rounded-2xl shadow-sm min-w-0">
           <CardContent className="p-4 md:p-5">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
               <div>
@@ -1601,7 +1602,7 @@ export default function WeatherMapEditor() {
                         style={{ left: `${ghost.x}%`, top: `${ghost.y}%`, transform: "translate(-50%, -50%)" }}
                       >
                         <div className="px-2 py-1 rounded-lg bg-white/85 backdrop-blur border shadow-sm" style={{ color: "#111827", fontSize: 20, fontWeight: 700 }}>
-                          {newLabelText.trim() || "Ville"}
+                          {"Ville"}
                         </div>
                       </div>
                     )}
@@ -1611,7 +1612,7 @@ export default function WeatherMapEditor() {
                         style={{ left: `${ghost.x}%`, top: `${ghost.y}%`, transform: "translate(-50%, -50%)" }}
                       >
                         <div className="px-2 py-1 rounded-xl bg-white/90 border shadow-sm" style={{ color: "#0f172a", fontSize: 20, fontWeight: 800 }}>
-                          {(newTempText.trim() || "25").includes("°") ? newTempText.trim() || "25" : `${newTempText.trim() || "25"}°C`}
+                          {`25°C`}
                         </div>
                       </div>
                     )}
@@ -1621,7 +1622,7 @@ export default function WeatherMapEditor() {
                         style={{ left: `${ghost.x}%`, top: `${ghost.y}%`, transform: "translate(-50%, -50%)" }}
                       >
                         <div className="px-2 py-1 rounded-xl bg-white/90 border shadow-sm flex items-center gap-1" style={{ color: "#0369a1", fontSize: 20, fontWeight: 700 }}>
-                          💨 {newWindSpeed.trim() || "50"} km/h
+                          💨 50 km/h
                         </div>
                       </div>
                     )}
@@ -2065,8 +2066,8 @@ export default function WeatherMapEditor() {
         )}
 
         {/* Droite : panneau */}
-        <Card className="rounded-2xl shadow-sm min-w-0">
-          <CardContent className="p-4 md:p-5 space-y-3">
+        <Card className="rounded-2xl shadow-sm min-w-0 md:order-1 md:sticky md:top-4 self-start h-max">
+          <CardContent className="p-4 md:p-5 space-y-3 max-h-[calc(100vh-2rem)] overflow-auto">
             <div>
               <div className="text-lg font-semibold mb-2">Outils</div>
               <div className="grid grid-cols-3 gap-2">
@@ -2167,34 +2168,6 @@ export default function WeatherMapEditor() {
                   </div>
                 </div>
               </details>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-2">
-              <div className="font-semibold text-sm">Éléments texte</div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Ville</Label>
-                  <Input value={newLabelText} onChange={(e) => setNewLabelText(e.target.value)} placeholder="Paris" className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Temp (°C)</Label>
-                  <Input value={newTempText} onChange={(e) => setNewTempText(e.target.value)} placeholder="42" className="h-8 text-xs" />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Vent (km/h)</Label>
-                <Input 
-                  type="number" 
-                  value={newWindSpeed} 
-                  onChange={(e) => setNewWindSpeed(e.target.value)} 
-                  placeholder="50" 
-                  min="0" 
-                  max="300"
-                  className="h-8 text-xs"
-                />
-              </div>
             </div>
 
             <Separator />
