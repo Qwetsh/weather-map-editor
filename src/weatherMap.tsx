@@ -14,6 +14,8 @@ import {
   Moon,
   Sun,
   Wind,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { toPng } from "html-to-image";
 import franceImg from "/img/france.png";
@@ -114,6 +116,7 @@ type BaseElement = {
   kind: "icon" | "label" | "temp";
   x: number; // percent 0..100
   y: number; // percent 0..100
+  locked?: boolean;
 };
 
 type IconElement = BaseElement & {
@@ -149,30 +152,177 @@ type WindElement = BaseElement & {
   border: boolean;
 };
 
-type ElementT = IconElement | LabelElement | TempElement | WindElement;
+type PressureZoneElement = BaseElement & {
+  kind: "pressure";
+  zone: "anticyclone" | "depression";
+  radius: number; // percent of stage width
+  hemisphere: "North" | "South"; // rotation direction depends on hemisphere
+};
+
+type ElementT = IconElement | LabelElement | TempElement | WindElement | PressureZoneElement;
+
+// Project save/load types and utilities
+type ProjectData = {
+  version: number;
+  timestamp: number;
+  bgId: string;
+  bgUrl: string | null;
+  aspectRatio: string;
+  elements: ElementT[];
+  customIcons: Array<{ id: string; label: string; glyph: string }>;
+};
+
+const STORAGE_KEY = "weathermap_project";
+const AUTO_SAVE_INTERVAL = 30000; // 30 seconds
+
+function saveProjectToLocalStorage(data: ProjectData) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.error("Failed to save project to localStorage:", e);
+  }
+}
+
+function loadProjectFromLocalStorage(): ProjectData | null {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch (e) {
+    console.error("Failed to load project from localStorage:", e);
+    return null;
+  }
+}
+
+function exportProjectAsJson(data: ProjectData): string {
+  return JSON.stringify(data, null, 2);
+}
+
+function downloadJsonFile(content: string, filename: string) {
+  const blob = new Blob([content], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importProjectFromJson(jsonString: string): ProjectData | null {
+  try {
+    const data = JSON.parse(jsonString);
+    // Validate structure
+    if (!data.version || !data.elements || !Array.isArray(data.elements)) {
+      throw new Error("Invalid project format");
+    }
+    return data as ProjectData;
+  } catch (e) {
+    console.error("Failed to parse project JSON:", e);
+    alert("Erreur : Fichier de projet invalide. Vérifiez le format JSON.");
+    return null;
+  }
+}
+
+/**
+ * Custom hook for managing undo history
+ * Keeps a stack of states and allows reverting to previous states
+ */
+function useHistory<T>(initialState: T, maxHistorySize: number = 50) {
+  const [state, setState] = useState<T>(initialState);
+  const historyRef = useRef<T[]>([initialState]); // Stack of states
+  const historyIndexRef = useRef<number>(0); // Current position in history
+
+  const updateState = (newState: T | ((prev: T) => T)) => {
+    setState((prev) => {
+      const nextState = typeof newState === 'function' ? (newState as (prev: T) => T)(prev) : newState;
+      
+      // When we make a new change, remove any "future" states (redo stack) beyond current position
+      historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+      
+      // Add the new state to history
+      historyRef.current.push(nextState);
+      
+      // Limit history size
+      if (historyRef.current.length > maxHistorySize) {
+        historyRef.current.shift();
+      } else {
+        historyIndexRef.current++;
+      }
+
+      return nextState;
+    });
+  };
+
+  const undo = () => {
+    if (historyIndexRef.current > 0) {
+      historyIndexRef.current--;
+      const previousState = historyRef.current[historyIndexRef.current];
+      setState(previousState);
+    }
+  };
+
+  return { state, setState: updateState, undo };
+}
 
 export default function WeatherMapEditor() {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Ghost preview state
   const [ghost, setGhost] = useState<null | { x: number; y: number }>(null);
 
-  
-  // Fond: intégré par défaut
-  const [bgId, setBgId] = useState(BUILTIN_BACKGROUNDS[0].id);
-  const [bgUrl, setBgUrl] = useState<string | null>(BUILTIN_BACKGROUNDS[0].src);
-  const [aspectRatio, setAspectRatio] = useState("16 / 9");
+  // Initialize from localStorage or defaults
+  const [bgId, setBgId] = useState(() => {
+    const saved = loadProjectFromLocalStorage();
+    return saved?.bgId ?? BUILTIN_BACKGROUNDS[0].id;
+  });
+  const [bgUrl, setBgUrl] = useState<string | null>(() => {
+    const saved = loadProjectFromLocalStorage();
+    return saved?.bgUrl ?? BUILTIN_BACKGROUNDS[0].src;
+  });
+  const [aspectRatio, setAspectRatio] = useState(() => {
+    const saved = loadProjectFromLocalStorage();
+    return saved?.aspectRatio ?? "16 / 9";
+  });
 
-  const [elements, setElements] = useState<ElementT[]>([]);
+  // Initialize elements from localStorage
+  const initialElements = (() => {
+    const saved = loadProjectFromLocalStorage();
+    return saved?.elements ?? [];
+  })();
+  const { state: elements, setState: setElements, undo: undoElements } = useHistory<ElementT[]>(initialElements, 50);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectionBox, setSelectionBox] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(null);
   const [isDrawingSelection, setIsDrawingSelection] = useState(false);
+  const [clipboard, setClipboard] = useState<ElementT[]>([]);
+  const [contextMenu, setContextMenu] = useState<null | {
+    x: number; // screen coordinates
+    y: number;
+    target: 'stage' | 'item';
+    targetIds: string[];
+    stageX: number; // stage percent coordinates
+    stageY: number;
+  }>(null);
+  const [editModal, setEditModal] = useState<null | { elementId: string }>(null);
+  const [drawingZone, setDrawingZone] = useState<null | { kind: 'anticyclone' | 'depression'; cx: number; cy: number; r: number }>(null);
+  const [stageSize, setStageSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [animationsEnabled, setAnimationsEnabled] = useState(true);
 
-  const [activeTool, setActiveTool] = useState<"select" | "add-icon" | "add-label" | "add-temp" | "add-wind">("select");
+  const [activeTool, setActiveTool] = useState<
+    | "select"
+    | "add-icon"
+    | "add-label"
+    | "add-temp"
+    | "add-wind"
+    | "add-anticyclone"
+    | "add-depression"
+  >("select");
   const [chosenIconId, setChosenIconId] = useState(ICONS[0].id);
 
-  // Custom icons (session-only)
+  // Custom icons
   type CustomIcon = { id: string; label: string; glyph: string };
-  const [customIcons, setCustomIcons] = useState<CustomIcon[]>([]);
+  const [customIcons, setCustomIcons] = useState<CustomIcon[]>(() => {
+    const saved = loadProjectFromLocalStorage();
+    return saved?.customIcons ?? [];
+  });
   const [newCustomIconGlyph, setNewCustomIconGlyph] = useState("⭐");
   const [newCustomIconLabel, setNewCustomIconLabel] = useState("Personnalisé");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -194,12 +344,21 @@ export default function WeatherMapEditor() {
     return saved ? parseInt(saved, 10) : 20;
   });
 
+  // Legend state
+  const [showLegend, setShowLegend] = useState(true);
+  const [legendPosition, setLegendPosition] = useState<{ x: number; y: number }>({ x: 2, y: 2 }); // percent
+  const legendDragRef = useRef<{ startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
+
   const selected = useMemo(
     () => (selectedIds.length === 1 ? elements.find((e) => e.id === selectedIds[0]) ?? null : null),
     [elements, selectedIds]
   );
 
   const selectedIcon = selected?.kind === "icon" ? ICONS.find((i) => i.id === selected.iconId) : null;
+
+  const selectedLockedCount = useMemo(() => {
+    return selectedIds.filter((id) => elements.find((e) => e.id === id)?.locked).length;
+  }, [elements, selectedIds]);
 
   // Multi-select helpers
   function toggleSelection(id: string) {
@@ -232,16 +391,239 @@ export default function WeatherMapEditor() {
       .map((el) => el.id);
   }
 
+  // Generate legend entries based on current elements
+  type LegendEntry = {
+    kind: 'icon' | 'pressure' | 'temp' | 'wind';
+    iconId?: string;
+    label: string;
+    glyph: string;
+  };
+
+  function generateLegend(): LegendEntry[] {
+    const legendMap = new Map<string, LegendEntry>();
+
+    elements.forEach((el) => {
+      if (el.kind === 'icon') {
+        const icon = getAvailableIcons().find((i) => i.id === el.iconId);
+        if (icon) {
+          const key = `icon-${el.iconId}`;
+          if (!legendMap.has(key)) {
+            legendMap.set(key, {
+              kind: 'icon',
+              iconId: el.iconId,
+              label: icon.label,
+              glyph: icon.glyph,
+            });
+          }
+        }
+      } else if (el.kind === 'pressure') {
+        // Only show in legend if circle is small (radius < 8) - when it displays A or D
+        if (el.radius < 8) {
+          const key = `pressure-${el.zone}`;
+          const glyph = el.zone === 'anticyclone' ? 'A' : 'D';
+          const label = el.zone === 'anticyclone' ? 'Anticyclone' : 'Dépression';
+          if (!legendMap.has(key)) {
+            legendMap.set(key, {
+              kind: 'pressure',
+              label,
+              glyph,
+            });
+          }
+        }
+      } else if (el.kind === 'wind') {
+        const key = 'wind';
+        if (!legendMap.has(key)) {
+          legendMap.set(key, {
+            kind: 'wind',
+            label: 'Vent',
+            glyph: '💨',
+          });
+        }
+      }
+    });
+
+    return Array.from(legendMap.values()).sort((a, b) => {
+      // Sort by kind priority
+      const kindOrder = { icon: 0, pressure: 1, wind: 2 };
+      return kindOrder[a.kind] - kindOrder[b.kind];
+    });
+  }
+
+  // Auto-save to localStorage
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const projectData: ProjectData = {
+        version: 1,
+        timestamp: Date.now(),
+        bgId,
+        bgUrl,
+        aspectRatio,
+        elements,
+        customIcons,
+      };
+      saveProjectToLocalStorage(projectData);
+    }, AUTO_SAVE_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [bgId, bgUrl, aspectRatio, elements, customIcons]);
+
+  // Export project as JSON
+  function exportProject() {
+    const projectData: ProjectData = {
+      version: 1,
+      timestamp: Date.now(),
+      bgId,
+      bgUrl,
+      aspectRatio,
+      elements,
+      customIcons,
+    };
+    const json = exportProjectAsJson(projectData);
+    const timestamp = new Date().toISOString().split('T')[0];
+    downloadJsonFile(json, `weather-map-${timestamp}.json`);
+  }
+
+  // Import project from JSON
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      const imported = importProjectFromJson(content);
+      if (!imported) return;
+
+      // Restore project state
+      setBgId(imported.bgId);
+      setBgUrl(imported.bgUrl);
+      setAspectRatio(imported.aspectRatio);
+      setElements(imported.elements);
+      setCustomIcons(imported.customIcons);
+      setSelectedIds([]);
+      setClipboard([]);
+      
+      alert("Projet importé avec succès !");
+    };
+    reader.readAsText(file);
+    
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && selectedIds.length > 0) {
+      // Check if we're in an input field - if so, don't interfere
+      const target = e.target as HTMLElement;
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      
+      // Undo: Ctrl+Z or Cmd+Z (works even in input fields for consistency with browser behavior)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !isInInput) {
+        e.preventDefault();
+        undoElements();
+        return;
+      }
+      
+      // Close modals on Escape
+      if (e.key === 'Escape') {
+        if (editModal) {
+          setEditModal(null);
+          return;
+        }
+        if (contextMenu) {
+          setContextMenu(null);
+          return;
+        }
+      }
+      
+      if (e.key === 'Delete' && selectedIds.length > 0 && !isInInput) {
         deleteSelected();
+      }
+      
+      // Copy: Ctrl+C or Cmd+C
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedIds.length > 0 && !isInInput) {
+        e.preventDefault();
+        copySelected();
+      }
+      
+      // Paste: Ctrl+V or Cmd+V
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && clipboard.length > 0 && !isInInput) {
+        e.preventDefault();
+        pasteFromClipboard();
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds]);
+  }, [selectedIds, clipboard, contextMenu, editModal, undoElements]);
+
+  function copySelected() {
+    if (selectedIds.length === 0) return;
+    const itemsToCopy = elements.filter((el) => selectedIds.includes(el.id));
+    setClipboard(itemsToCopy);
+  }
+
+  function pasteFromClipboard(atX?: number, atY?: number) {
+    if (clipboard.length === 0) return;
+    
+    // If position specified, paste relative to that position
+    // Otherwise use default offset from original position
+    const PASTE_OFFSET = 5; // 5% offset
+    
+    let newElements: ElementT[];
+    if (atX !== undefined && atY !== undefined) {
+      // Paste at specific position (e.g., from context menu)
+      // Calculate centroid of copied items
+      const avgX = clipboard.reduce((sum, el) => sum + el.x, 0) / clipboard.length;
+      const avgY = clipboard.reduce((sum, el) => sum + el.y, 0) / clipboard.length;
+      
+      newElements = clipboard.map((el) => {
+        const offsetX = el.x - avgX;
+        const offsetY = el.y - avgY;
+        return {
+          ...el,
+          id: uid(el.kind),
+          x: clamp(atX + offsetX, 0, 100),
+          y: clamp(atY + offsetY, 0, 100),
+        } as ElementT;
+      });
+    } else {
+      // Default paste with offset
+      newElements = clipboard.map((el) => {
+        const newEl = {
+          ...el,
+          id: uid(el.kind),
+          x: clamp(el.x + PASTE_OFFSET, 0, 100),
+          y: clamp(el.y + PASTE_OFFSET, 0, 100),
+        };
+        return newEl as ElementT;
+      });
+    }
+    
+    // Add new elements to the stage
+    setElements((prev) => [...prev, ...newElements]);
+    
+    // Select the pasted items
+    setSelection(newElements.map((el) => el.id));
+  }
+
+  function duplicateSelected() {
+    if (selectedIds.length === 0) return;
+    const itemsToDuplicate = elements.filter((el) => selectedIds.includes(el.id));
+    
+    const DUPLICATE_OFFSET = 5; // 5% offset
+    const newElements: ElementT[] = itemsToDuplicate.map((el) => {
+      return {
+        ...el,
+        id: uid(el.kind),
+        x: clamp(el.x + DUPLICATE_OFFSET, 0, 100),
+        y: clamp(el.y + DUPLICATE_OFFSET, 0, 100),
+      } as ElementT;
+    });
+    
+    setElements((prev) => [...prev, ...newElements]);
+    setSelection(newElements.map((el) => el.id));
+  }
 
   // Theme initialization
   useEffect(() => {
@@ -303,8 +685,37 @@ export default function WeatherMapEditor() {
     return { xPct: clamp(x, 0, 100), yPct: clamp(y, 0, 100) };
   }
 
+  // Track stage size for accurate circle rendering
+  useEffect(() => {
+    const update = () => {
+      const rect = stageRef.current?.getBoundingClientRect();
+      if (rect) setStageSize({ w: rect.width, h: rect.height });
+    };
+    update();
+    if (!stageRef.current) return;
+    let ro: ResizeObserver | null = null;
+    try {
+      ro = new ResizeObserver(update);
+      ro.observe(stageRef.current);
+    } catch {}
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      if (ro) ro.disconnect();
+    };
+  }, []);
+
+  // Pause animations when tab is hidden
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      setAnimationsEnabled(!document.hidden);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
   function addIconAtPct(x: number, y: number) {
-    const el: IconElement = { id: uid("icon"), kind: "icon", iconId: chosenIconId, x, y, size: 44 };
+    const el: IconElement = { id: uid("icon"), kind: "icon", iconId: chosenIconId, x, y, size: 44, locked: false };
     setElements((prev) => [...prev, el]);
     setSelection(el.id);
   }
@@ -320,6 +731,7 @@ export default function WeatherMapEditor() {
       color: "#111827",
       bg: false,
       border: false,
+      locked: false,
     };
     setElements((prev) => [...prev, el]);
     setSelection(el.id);
@@ -336,6 +748,7 @@ export default function WeatherMapEditor() {
       color: "#0f172a",
       bg: false,
       border: false,
+      locked: false,
     };
     setElements((prev) => [...prev, el]);
     setSelection(el.id);
@@ -352,6 +765,7 @@ export default function WeatherMapEditor() {
       color: "#0369a1",
       bg: false,
       border: false,
+      locked: false,
     };
     setElements((prev) => [...prev, el]);
     setSelection(el.id);
@@ -359,6 +773,7 @@ export default function WeatherMapEditor() {
 
   // Drag (en %)
   const dragRef = useRef<{ ids: string[]; dx: number; dy: number } | null>(null);
+  const resizeRef = useRef<{ id: string } | null>(null);
 
   function onStagePointerDown(e: React.PointerEvent) {
     if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp" || activeTool === "add-wind") {
@@ -378,6 +793,12 @@ export default function WeatherMapEditor() {
       setActiveTool("select");
       return;
     }
+    // Start drawing pressure zone
+    if (activeTool === "add-anticyclone" || activeTool === "add-depression") {
+      const p = stagePointPctFromEvent(e);
+      setDrawingZone({ kind: activeTool === 'add-anticyclone' ? 'anticyclone' : 'depression', cx: p.xPct, cy: p.yPct, r: 2 });
+      return;
+    }
     
     // Selection box dragging
     const p = stagePointPctFromEvent(e);
@@ -387,9 +808,31 @@ export default function WeatherMapEditor() {
 
   // Mouse move for ghost preview and selection box
   function onStagePointerMove(e: React.PointerEvent) {
+    // Resizing pressure zone
+    if (resizeRef.current) {
+      const p = stagePointPctFromEvent(e);
+      const id = resizeRef.current.id;
+      const el = elements.find((x) => x.id === id) as PressureZoneElement | undefined;
+      if (el && el.kind === 'pressure') {
+        const dx = p.xPct - el.x;
+        const dy = p.yPct - el.y;
+        const r = clamp(Math.sqrt(dx * dx + dy * dy), 2, 50);
+        setElements((prev) => prev.map((e2) => (e2.id === id ? ({ ...e2, radius: r } as ElementT) : e2)));
+      }
+      return;
+    }
     if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp" || activeTool === "add-wind") {
       const p = stagePointPctFromEvent(e);
       setGhost({ x: p.xPct, y: p.yPct });
+      return;
+    }
+    // Update drawing pressure zone radius
+    if (drawingZone) {
+      const p = stagePointPctFromEvent(e);
+      const dx = p.xPct - drawingZone.cx;
+      const dy = p.yPct - drawingZone.cy;
+      const r = clamp(Math.sqrt(dx * dx + dy * dy), 2, 50);
+      setDrawingZone({ ...drawingZone, r });
       return;
     }
 
@@ -403,6 +846,10 @@ export default function WeatherMapEditor() {
   // Mouse leave: clear ghost
   function onStagePointerLeave() {
     setGhost(null);
+    if (drawingZone) {
+      setDrawingZone(null);
+      setActiveTool('select');
+    }
     if (isDrawingSelection) {
       setIsDrawingSelection(false);
       setSelectionBox(null);
@@ -411,6 +858,28 @@ export default function WeatherMapEditor() {
 
   // Mouse up: finalize selection box
   function onStagePointerUp(e: React.PointerEvent) {
+    if (resizeRef.current) {
+      resizeRef.current = null;
+      return;
+    }
+    if (drawingZone) {
+      const r = clamp(drawingZone.r, 2, 50);
+      const el: PressureZoneElement = {
+        id: uid('pressure'),
+        kind: 'pressure',
+        zone: drawingZone.kind,
+        x: drawingZone.cx,
+        y: drawingZone.cy,
+        radius: r,
+        hemisphere: 'North', // default to Northern Hemisphere
+        locked: false,
+      };
+      setElements((prev) => [...prev, el]);
+      setSelection(el.id);
+      setDrawingZone(null);
+      setActiveTool('select');
+      return;
+    }
     if (isDrawingSelection && selectionBox) {
       const selected = elementsInBox(selectionBox);
       if (selected.length > 0) {
@@ -423,13 +892,54 @@ export default function WeatherMapEditor() {
     }
   }
 
-  // Right click to cancel
+  // Right click to show context menu
   function onStageContextMenu(e: React.MouseEvent) {
-    if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp" || activeTool === "add-wind") {
-      e.preventDefault();
+    e.preventDefault();
+    
+    // If in placement mode, cancel it
+    if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp" || activeTool === "add-wind" || activeTool === "add-anticyclone" || activeTool === "add-depression") {
       setGhost(null);
       setActiveTool("select");
+      return;
     }
+    
+    // Get stage position
+    const p = stagePointPctFromEvent(e as any);
+    
+    // Show context menu for stage
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      target: 'stage',
+      targetIds: [],
+      stageX: p.xPct,
+      stageY: p.yPct,
+    });
+  }
+
+  // Right click on element
+  function onElementContextMenu(e: React.MouseEvent, id: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If clicked item is not selected, select it (replace selection)
+    // If it's already selected (part of multi-selection), keep the selection
+    if (!selectedIds.includes(id)) {
+      setSelection(id);
+    }
+    
+    // Get stage position
+    const p = stagePointPctFromEvent(e as any);
+    
+    // Show context menu for item(s)
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      target: 'item',
+      targetIds: selectedIds.includes(id) ? selectedIds : [id],
+      stageX: p.xPct,
+      stageY: p.yPct,
+    });
   }
 
   // Escape key to cancel
@@ -444,6 +954,14 @@ export default function WeatherMapEditor() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [activeTool]);
 
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = () => setContextMenu(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [contextMenu]);
+
   function onElementPointerDown(e: React.PointerEvent, id: string) {
     e.stopPropagation();
     
@@ -456,10 +974,16 @@ export default function WeatherMapEditor() {
     
     const p = stagePointPctFromEvent(e);
     const selectedEls = selectedIds.includes(id) ? selectedIds : [id];
-    dragRef.current = { 
-      ids: selectedEls, 
-      dx: p.xPct - (elements.find((x) => x.id === selectedEls[0])?.x ?? 0), 
-      dy: p.yPct - (elements.find((x) => x.id === selectedEls[0])?.y ?? 0) 
+    const movableIds = selectedEls.filter((elId) => {
+      const el = elements.find((x) => x.id === elId);
+      return !el?.locked;
+    });
+    const anchor = elements.find((x) => x.id === movableIds[0]);
+    if (!anchor) return;
+    dragRef.current = {
+      ids: movableIds,
+      dx: p.xPct - anchor.x,
+      dy: p.yPct - anchor.y,
     };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
@@ -480,7 +1004,7 @@ export default function WeatherMapEditor() {
     // Move all selected elements by the same offset
     setElements((prev) =>
       prev.map((el) => {
-        if (d.ids.includes(el.id)) {
+        if (d.ids.includes(el.id) && !el.locked) {
           return {
             ...el,
             x: clamp(el.x + offsetX, 0, 100),
@@ -534,7 +1058,14 @@ export default function WeatherMapEditor() {
 
   function updateSelected(patch: Partial<ElementT>) {
     if (selectedIds.length !== 1) return;
+    const target = elements.find((e) => e.id === selectedIds[0]);
+    if (!target || target.locked) return;
     setElements((prev) => prev.map((e) => (e.id === selectedIds[0] ? ({ ...e, ...patch } as ElementT) : e)));
+  }
+
+  function setLocked(ids: string[], locked: boolean) {
+    if (ids.length === 0) return;
+    setElements((prev) => prev.map((e) => (ids.includes(e.id) ? ({ ...e, locked } as ElementT) : e)));
   }
 
   function handleLabelFontSizeChange(value: number) {
@@ -624,11 +1155,31 @@ export default function WeatherMapEditor() {
               <Button className="rounded-xl gap-2" onClick={exportPng}>
                 <Download className="h-4 w-4" /> Export PNG
               </Button>
+              <Button variant="outline" className="rounded-xl gap-2" onClick={exportProject}>
+                <Download className="h-4 w-4" /> Exporter Projet
+              </Button>
+              <Button variant="outline" className="rounded-xl gap-2" onClick={() => fileInputRef.current?.click()}>
+                📂 Importer Projet
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImportFile}
+                style={{ display: "none" }}
+              />
               <Button variant="outline" className="rounded-xl gap-2" onClick={deleteSelected} disabled={selectedIds.length === 0}>
                 <Trash2 className="h-4 w-4" /> Supprimer
               </Button>
               <Button variant="destructive" className="rounded-xl gap-2" onClick={resetAllElements} disabled={elements.length === 0}>
                 <Trash2 className="h-4 w-4" /> Réinitialiser tout
+              </Button>
+              <Button 
+                variant={showLegend ? "default" : "outline"} 
+                className="rounded-xl gap-2" 
+                onClick={() => setShowLegend(!showLegend)}
+              >
+                📋 {showLegend ? 'Masquer' : 'Afficher'} légende
               </Button>
             </div>
 
@@ -652,6 +1203,103 @@ export default function WeatherMapEditor() {
                   const isSelItem = isSelected(el.id);
                   const baseClass = "absolute select-none cursor-move" + (isSelItem ? " border-2 border-dashed border-indigo-500 rounded-lg" : "");
 
+                  if (el.kind === "pressure") {
+                    const sizePx = stageSize.w > 0 ? (el.radius / 100) * stageSize.w * 2 : 0;
+                    const isAnticyclone = el.zone === 'anticyclone';
+                    const fill = isAnticyclone ? 'rgba(59,130,246,0.20)' : 'rgba(239,68,68,0.20)';
+                    const stroke = isAnticyclone ? '#3b82f6' : '#ef4444';
+                    const labelText = el.radius >= 8 ? (isAnticyclone ? 'Anticyclone' : 'Dépression') : (isAnticyclone ? 'A' : 'D');
+                    const markerId = `arrow-${el.id}`;
+                    // Determine rotation direction based on hemisphere and zone type
+                    // Northern Hemisphere: Anticyclones clockwise, Depressions counter-clockwise
+                    // Southern Hemisphere: Anticyclones counter-clockwise, Depressions clockwise
+                    const hemisphere = el.hemisphere || 'North'; // default to North for backward compatibility
+                    const isNorthern = hemisphere === 'North';
+                    const shouldRotateClockwise = isNorthern ? isAnticyclone : !isAnticyclone;
+                    return (
+                      <div
+                        key={el.id}
+                        onPointerDown={(e) => onElementPointerDown(e, el.id)}
+                        onPointerMove={(e) => onElementPointerMove(e, el.id)}
+                        onPointerUp={(e) => onElementPointerUp(e, el.id)}
+                        onContextMenu={(e) => onElementContextMenu(e, el.id)}
+                        className="absolute select-none"
+                        style={{ left: `${el.x}%`, top: `${el.y}%`, transform: 'translate(-50%, -50%)', width: sizePx, height: sizePx }}
+                        title={isAnticyclone ? 'Anticyclone' : 'Dépression'}
+                      >
+                        <div
+                          className="w-full h-full"
+                          style={{ borderRadius: '9999px', border: `2px solid ${stroke}`, background: fill, pointerEvents: 'none' }}
+                        />
+                        {/* Rotating circulation overlay */}
+                        <svg
+                          className="absolute inset-0"
+                          viewBox="0 0 100 100"
+                          xmlns="http://www.w3.org/2000/svg"
+                          style={{
+                            pointerEvents: 'none',
+                            transformOrigin: '50% 50%',
+                            animation: 'pressure-spin 22s linear infinite',
+                            animationPlayState: animationsEnabled ? 'running' : 'paused',
+                            animationDirection: shouldRotateClockwise ? 'normal' : 'reverse',
+                          }}
+                        >
+                          <defs>
+                            <marker id={markerId} markerWidth="6" markerHeight="6" refX="5.5" refY="3" orient="auto">
+                              <path d="M0,0 L6,3 L0,6 Z" fill={stroke} />
+                            </marker>
+                          </defs>
+                          <g stroke={stroke} fill="none" strokeWidth="2.5" strokeLinecap="round">
+                            {/* Arrows positioned on circle perimeter, tangent to circle */}
+                            {[0, 60, 120, 180, 240, 300].map((angleDeg) => {
+                              const radius = 35; // Circle radius in viewBox units
+                              const cx = 50; // Center X
+                              const cy = 50; // Center Y
+                              
+                              // Create a visible arc segment for the arrow line
+                              // Arc spans 25 degrees to be clearly visible
+                              const arcSpan = 25;
+                              const startAngle = angleDeg - (shouldRotateClockwise ? arcSpan : -arcSpan);
+                              const endAngle = angleDeg + (shouldRotateClockwise ? arcSpan : -arcSpan);
+                              
+                              const startRad = (startAngle * Math.PI) / 180;
+                              const endRad = (endAngle * Math.PI) / 180;
+                              
+                              const x1 = cx + radius * Math.cos(startRad);
+                              const y1 = cy + radius * Math.sin(startRad);
+                              const x2 = cx + radius * Math.cos(endRad);
+                              const y2 = cy + radius * Math.sin(endRad);
+                              
+                              // Arc path following the circle - longer arc for visible line
+                              const arcPath = `M ${x1} ${y1} A ${radius} ${radius} 0 0 ${shouldRotateClockwise ? 1 : 0} ${x2} ${y2}`;
+                              
+                              return <path key={angleDeg} d={arcPath} markerEnd={`url(#${markerId})`} />;
+                            })}
+                          </g>
+                        </svg>
+                        <div
+                          className="absolute inset-0 flex items-center justify-center text-center"
+                          style={{ color: stroke, fontWeight: 700, pointerEvents: 'none' }}
+                        >
+                          {labelText}
+                        </div>
+                        {/* Resize handle (east) only when selected */}
+                        {isSelItem && (
+                          <div
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              if (!isSelected(el.id)) setSelection(el.id);
+                              resizeRef.current = { id: el.id };
+                              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                            }}
+                            className="absolute bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full"
+                            style={{ left: '100%', top: '50%', transform: 'translate(-50%, -50%)', width: 12, height: 12, cursor: 'ew-resize' }}
+                            title="Redimensionner"
+                          />
+                        )}
+                      </div>
+                    );
+                  }
                   if (el.kind === "icon") {
                     const icon = getAvailableIcons().find((i) => i.id === el.iconId) ?? ICONS[0];
                     return (
@@ -660,6 +1308,7 @@ export default function WeatherMapEditor() {
                         onPointerDown={(e) => onElementPointerDown(e, el.id)}
                         onPointerMove={(e) => onElementPointerMove(e, el.id)}
                         onPointerUp={(e) => onElementPointerUp(e, el.id)}
+                        onContextMenu={(e) => onElementContextMenu(e, el.id)}
                         className={baseClass}
                         style={{ left: `${el.x}%`, top: `${el.y}%`, transform: "translate(-50%, -50%)", fontSize: el.size, padding: 4 }}
                         title={icon.label}
@@ -676,6 +1325,7 @@ export default function WeatherMapEditor() {
                         onPointerDown={(e) => onElementPointerDown(e, el.id)}
                         onPointerMove={(e) => onElementPointerMove(e, el.id)}
                         onPointerUp={(e) => onElementPointerUp(e, el.id)}
+                        onContextMenu={(e) => onElementContextMenu(e, el.id)}
                         className={baseClass}
                         style={{ left: `${el.x}%`, top: `${el.y}%`, transform: "translate(-50%, -50%)" }}
                         title="Température"
@@ -697,6 +1347,7 @@ export default function WeatherMapEditor() {
                         onPointerDown={(e) => onElementPointerDown(e, el.id)}
                         onPointerMove={(e) => onElementPointerMove(e, el.id)}
                         onPointerUp={(e) => onElementPointerUp(e, el.id)}
+                        onContextMenu={(e) => onElementContextMenu(e, el.id)}
                         className={baseClass}
                         style={{ left: `${el.x}%`, top: `${el.y}%`, transform: "translate(-50%, -50%)" }}
                         title="Vent"
@@ -718,6 +1369,7 @@ export default function WeatherMapEditor() {
                       onPointerDown={(e) => onElementPointerDown(e, el.id)}
                       onPointerMove={(e) => onElementPointerMove(e, el.id)}
                       onPointerUp={(e) => onElementPointerUp(e, el.id)}
+                      onContextMenu={(e) => onElementContextMenu(e, el.id)}
                       className={baseClass}
                       style={{ left: `${el.x}%`, top: `${el.y}%`, transform: "translate(-50%, -50%)" }}
                       title="Ville"
@@ -773,6 +1425,24 @@ export default function WeatherMapEditor() {
                   </>
                 )}
 
+                {/* Drawing pressure zone preview */}
+                {drawingZone && (
+                  <div
+                    className="absolute pointer-events-none select-none"
+                    style={{ left: `${drawingZone.cx}%`, top: `${drawingZone.cy}%`, transform: 'translate(-50%, -50%)' }}
+                  >
+                    <div
+                      style={{
+                        width: stageSize.w > 0 ? (drawingZone.r / 100) * stageSize.w * 2 : 0,
+                        height: stageSize.w > 0 ? (drawingZone.r / 100) * stageSize.w * 2 : 0,
+                        borderRadius: '9999px',
+                        border: `2px solid ${drawingZone.kind === 'anticyclone' ? '#3b82f6' : '#ef4444'}`,
+                        background: drawingZone.kind === 'anticyclone' ? 'rgba(59,130,246,0.20)' : 'rgba(239,68,68,0.20)',
+                      }}
+                    />
+                  </div>
+                )}
+
                 {/* Selection box */}
                 {selectionBox && isDrawingSelection && (
                   <div
@@ -785,14 +1455,395 @@ export default function WeatherMapEditor() {
                     }}
                   />
                 )}
+
+                {/* Legend */}
+                {showLegend && (() => {
+                  const legendEntries = generateLegend();
+                  if (legendEntries.length === 0) return null;
+
+                  const legendWidth = 160; // pixels
+                  const legendHeight = 30 + legendEntries.length * 28; // dynamic height
+
+                  return (
+                    <div
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        const rect = stageRef.current?.getBoundingClientRect();
+                        if (!rect) return;
+                        legendDragRef.current = {
+                          startX: e.clientX,
+                          startY: e.clientY,
+                          offsetX: legendPosition.x,
+                          offsetY: legendPosition.y,
+                        };
+                        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      }}
+                      onPointerMove={(e) => {
+                        if (!legendDragRef.current) return;
+                        e.stopPropagation();
+                        const rect = stageRef.current?.getBoundingClientRect();
+                        if (!rect) return;
+                        const dx = ((e.clientX - legendDragRef.current.startX) / rect.width) * 100;
+                        const dy = ((e.clientY - legendDragRef.current.startY) / rect.height) * 100;
+                        const newX = clamp(legendDragRef.current.offsetX + dx, 0, 100);
+                        const newY = clamp(legendDragRef.current.offsetY + dy, 0, 100);
+                        setLegendPosition({ x: newX, y: newY });
+                      }}
+                      onPointerUp={() => {
+                        legendDragRef.current = null;
+                      }}
+                      className="absolute bg-white/95 dark:bg-slate-800/95 border-2 border-slate-300 dark:border-slate-600 rounded-lg shadow-lg p-3 cursor-move select-none"
+                      style={{
+                        left: `${legendPosition.x}%`,
+                        top: `${legendPosition.y}%`,
+                        width: legendWidth,
+                        transform: 'translate(0, 0)',
+                        backdropFilter: 'blur(2px)',
+                      }}
+                      title="Drag to move legend"
+                    >
+                      <div className="font-bold text-sm mb-2 text-slate-800 dark:text-white">Légende</div>
+                      {legendEntries.map((entry, idx) => (
+                        <div key={idx} className="flex items-center gap-2 mb-1 text-xs">
+                          <span className="text-lg font-bold min-w-max">{entry.glyph}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-slate-700 dark:text-slate-300 truncate text-xs font-medium">{entry.label}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="mt-3 text-xs text-slate-600 dark:text-slate-300 cursor-default">
-                <span className="font-semibold">Astuce :</span> clique sur « Icône / Ville / Température », puis clique sur la carte. Déplace en glissant. Clique sur un élément pour l'éditer. Glisse pour sélectionner plusieurs éléments. Shift+clic sur les icônes pour en placer plusieurs d'affilée.
+                <span className="font-semibold">Astuce :</span> clique sur « Icône / Ville / Température », puis clique sur la carte. Déplace en glissant. Clique sur un élément pour l'éditer. Glisse pour sélectionner plusieurs éléments. Shift+clic sur les icônes pour en placer plusieurs d'affilée. <span className="font-semibold">Ctrl+C / Ctrl+V</span> pour copier/coller. <span className="font-semibold">Clic droit</span> pour menu contextuel.
               </div>
             </div>
           </CardContent>
         </Card>
+
+        {/* Edit Modal */}
+        {editModal && (() => {
+          const el = elements.find(e => e.id === editModal.elementId);
+          if (!el) return null;
+          
+          return (
+            <div 
+              className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+              onClick={() => setEditModal(null)}
+            >
+              <div 
+                className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl p-5 w-full max-w-md mx-4"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">
+                    Éditer {el.kind === 'icon' ? 'Icône' : el.kind === 'label' ? 'Ville' : el.kind === 'temp' ? 'Température' : 'Vent'}
+                  </h3>
+                  <button 
+                    onClick={() => setEditModal(null)}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    ✕
+                  </button>
+                </div>
+                
+                {el.kind === 'icon' && (
+                  <div className="space-y-3">
+                    <Label className="text-sm">Choisir un emoji</Label>
+                    <div className="grid grid-cols-6 gap-2 max-h-64 overflow-y-auto p-2 bg-slate-50 dark:bg-slate-900 rounded-lg">
+                      {EMOJI_PICKER.map((emoji, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            // Create a new custom icon entry if this emoji isn't in getAvailableIcons
+                            const existingIcon = getAvailableIcons().find(i => i.glyph === emoji);
+                            if (existingIcon) {
+                              updateSelected({ iconId: existingIcon.id } as any);
+                            } else {
+                              // Add as a new custom icon
+                              const newCustomIcon = { id: uid('icon'), glyph: emoji, label: emoji };
+                              setCustomIcons(prev => [...prev, newCustomIcon]);
+                              updateSelected({ iconId: newCustomIcon.id } as any);
+                            }
+                          }}
+                          className={`text-2xl p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 ${
+                            el.iconId === (getAvailableIcons().find(i => i.glyph === emoji)?.id ?? '') ? 'bg-blue-100 dark:bg-blue-900 ring-2 ring-blue-500' : ''
+                          }`}
+                          title={emoji}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex justify-end gap-2 mt-4">
+                      <Button variant="outline" onClick={() => setEditModal(null)} className="rounded-lg">
+                        Fermer
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
+                {el.kind === 'label' && (
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-sm">Texte</Label>
+                      <Input 
+                        value={el.text}
+                        onChange={(e) => updateSelected({ text: e.target.value } as any)}
+                        className="mt-1"
+                        placeholder="Nom de ville"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 mt-4">
+                      <Button variant="outline" onClick={() => setEditModal(null)} className="rounded-lg">
+                        Fermer
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
+                {el.kind === 'temp' && (
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-sm">Température</Label>
+                      <Input 
+                        value={el.value}
+                        onChange={(e) => updateSelected({ value: e.target.value } as any)}
+                        className="mt-1"
+                        placeholder="25"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 mt-4">
+                      <Button variant="outline" onClick={() => setEditModal(null)} className="rounded-lg">
+                        Fermer
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
+                {el.kind === 'wind' && (
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-sm">Vitesse du vent (km/h)</Label>
+                      <Input 
+                        type="number"
+                        min={0}
+                        max={300}
+                        value={el.speedKmh}
+                        onChange={(e) => updateSelected({ speedKmh: Number(e.target.value) } as any)}
+                        className="mt-1"
+                        placeholder="50"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 mt-4">
+                      <Button variant="outline" onClick={() => setEditModal(null)} className="rounded-lg">
+                        Fermer
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Context Menu */}
+        {contextMenu && (
+          <div
+            className="fixed bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 z-50 min-w-[160px]"
+            style={{
+              left: Math.min(contextMenu.x, window.innerWidth - 180),
+              top: Math.min(contextMenu.y, window.innerHeight - 300),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {contextMenu.target === 'item' ? (
+              // Menu for selected item(s)
+              <>
+                {/* Only show Edit button for non-pressure items */}
+                {!contextMenu.targetIds.every(id => elements.find(e => e.id === id)?.kind === 'pressure') && (
+                  <button
+                    className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                    onClick={() => {
+                      // Open edit modal for the first selected item
+                      if (contextMenu.targetIds.length > 0) {
+                        setEditModal({ elementId: contextMenu.targetIds[0] });
+                      }
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Type className="h-3.5 w-3.5" />
+                    Éditer
+                  </button>
+                )}
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    copySelected();
+                    setContextMenu(null);
+                  }}
+                >
+                  <span className="text-xs">📋</span>
+                  Copier ({contextMenu.targetIds.length})
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    duplicateSelected();
+                    setContextMenu(null);
+                  }}
+                >
+                  <span className="text-xs">📑</span>
+                  Dupliquer
+                </button>
+                {/* Hemisphere toggle for pressure zones */}
+                {contextMenu.targetIds.length > 0 && 
+                 contextMenu.targetIds.every(id => elements.find(e => e.id === id)?.kind === 'pressure') && (
+                  <>
+                    <div className="h-px bg-slate-200 dark:bg-slate-700 my-1" />
+                    <div className="px-3 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400">Hémisphère</div>
+                    <button
+                      className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                      onClick={() => {
+                        setElements(prev => prev.map(el => 
+                          contextMenu.targetIds.includes(el.id) && el.kind === 'pressure' 
+                            ? { ...el, hemisphere: 'North' as const }
+                            : el
+                        ));
+                        setContextMenu(null);
+                      }}
+                    >
+                      <span className="text-xs">🌍</span>
+                      Nord
+                    </button>
+                    <button
+                      className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                      onClick={() => {
+                        setElements(prev => prev.map(el => 
+                          contextMenu.targetIds.includes(el.id) && el.kind === 'pressure' 
+                            ? { ...el, hemisphere: 'South' as const }
+                            : el
+                        ));
+                        setContextMenu(null);
+                      }}
+                    >
+                      <span className="text-xs">🌏</span>
+                      Sud
+                    </button>
+                  </>
+                )}
+                {clipboard.length > 0 && (
+                  <button
+                    className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                    onClick={() => {
+                      pasteFromClipboard(contextMenu.stageX, contextMenu.stageY);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <span className="text-xs">📄</span>
+                    Coller ici
+                  </button>
+                )}
+                <div className="h-px bg-slate-200 dark:bg-slate-700 my-1" />
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 text-red-600 dark:text-red-400 flex items-center gap-2"
+                  onClick={() => {
+                    deleteSelected();
+                    setContextMenu(null);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Supprimer ({contextMenu.targetIds.length})
+                </button>
+              </>
+            ) : (
+              // Menu for empty stage
+              <>
+                <div className="px-3 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400">Ajouter</div>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    addIconAtPct(contextMenu.stageX, contextMenu.stageY);
+                    setContextMenu(null);
+                  }}
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  Icône météo
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    setActiveTool('add-anticyclone');
+                    setContextMenu(null);
+                  }}
+                >
+                  <Sun className="h-3.5 w-3.5" />
+                  Anticyclone (outil)
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    setActiveTool('add-depression');
+                    setContextMenu(null);
+                  }}
+                >
+                  <Thermometer className="h-3.5 w-3.5" />
+                  Dépression (outil)
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    addLabelAtPct(contextMenu.stageX, contextMenu.stageY);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Type className="h-3.5 w-3.5" />
+                  Nom de ville
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    addTempAtPct(contextMenu.stageX, contextMenu.stageY);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Thermometer className="h-3.5 w-3.5" />
+                  Température
+                </button>
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    addWindAtPct(contextMenu.stageX, contextMenu.stageY);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Wind className="h-3.5 w-3.5" />
+                  Force du vent
+                </button>
+                {clipboard.length > 0 && (
+                  <>
+                    <div className="h-px bg-slate-200 dark:bg-slate-700 my-1" />
+                    <button
+                      className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                      onClick={() => {
+                        pasteFromClipboard(contextMenu.stageX, contextMenu.stageY);
+                        setContextMenu(null);
+                      }}
+                    >
+                      <span className="text-xs">📄</span>
+                      Coller ({clipboard.length})
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {/* Droite : panneau */}
         <Card className="rounded-2xl shadow-sm min-w-0">
@@ -814,6 +1865,12 @@ export default function WeatherMapEditor() {
                 </Button>
                 <Button variant={activeTool === "add-wind" ? "default" : "outline"} onClick={() => setActiveTool("add-wind")} className="rounded-lg" size="sm">
                   <Wind className="h-4 w-4" /> Force du vent
+                </Button>
+                <Button variant={activeTool === "add-anticyclone" ? "default" : "outline"} onClick={() => setActiveTool("add-anticyclone")} className="rounded-lg" size="sm">
+                  <Sun className="h-4 w-4" /> Anticyclone
+                </Button>
+                <Button variant={activeTool === "add-depression" ? "default" : "outline"} onClick={() => setActiveTool("add-depression")} className="rounded-lg" size="sm">
+                  <Thermometer className="h-4 w-4" /> Dépression
                 </Button>
               </div>
             </div>
@@ -1017,6 +2074,25 @@ export default function WeatherMapEditor() {
                       <input type="checkbox" checked={selected.border} onChange={(e) => updateSelected({ border: e.target.checked } as any)} className="w-3 h-3" />
                       Bordure
                     </label>
+                  </div>
+                </div>
+              ) : selected?.kind === "pressure" ? (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold">{selected.zone === 'anticyclone' ? 'Anticyclone' : 'Dépression'}</div>
+                  <div>
+                    <Label className="text-xs">Rayon</Label>
+                    <Input type="range" min={2} max={50} value={selected.radius} onChange={(e) => updateSelected({ radius: Number(e.target.value) } as any)} className="h-6" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Hémisphère</Label>
+                    <select 
+                      value={selected.hemisphere || 'North'} 
+                      onChange={(e) => updateSelected({ hemisphere: e.target.value as 'North' | 'South' } as any)}
+                      className="w-full h-8 text-xs border border-slate-300 dark:border-slate-600 rounded-md px-2 bg-white dark:bg-slate-800"
+                    >
+                      <option value="North">Nord</option>
+                      <option value="South">Sud</option>
+                    </select>
                   </div>
                 </div>
               ) : null}

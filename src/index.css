@@ -1,3 +1,8 @@
+/* Pressure zone rotation animation */
+@keyframes pressure-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
