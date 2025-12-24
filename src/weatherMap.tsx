@@ -228,27 +228,40 @@ function importProjectFromJson(jsonString: string): ProjectData | null {
  */
 function useHistory<T>(initialState: T, maxHistorySize: number = 50) {
   const [state, setState] = useState<T>(initialState);
-  const historyRef = useRef<T[]>([initialState]); // Stack of states
-  const historyIndexRef = useRef<number>(0); // Current position in history
+  const historyRef = useRef<T[]>([initialState]);
+  const historyIndexRef = useRef<number>(0);
 
+  // Commit a new state and record it in history
   const updateState = (newState: T | ((prev: T) => T)) => {
     setState((prev) => {
       const nextState = typeof newState === 'function' ? (newState as (prev: T) => T)(prev) : newState;
-      
-      // When we make a new change, remove any "future" states (redo stack) beyond current position
       historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
-      
-      // Add the new state to history
       historyRef.current.push(nextState);
-      
-      // Limit history size
       if (historyRef.current.length > maxHistorySize) {
         historyRef.current.shift();
       } else {
         historyIndexRef.current++;
       }
-
       return nextState;
+    });
+  };
+
+  // Update state without recording history (useful for interactive drags)
+  const setStateWithoutHistory = (newState: T | ((prev: T) => T)) => {
+    setState((prev) => (typeof newState === 'function' ? (newState as (prev: T) => T)(prev) : newState));
+  };
+
+  // Commit current state to history (after a series of temporary updates)
+  const commit = () => {
+    setState((prev) => {
+      historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+      historyRef.current.push(prev);
+      if (historyRef.current.length > maxHistorySize) {
+        historyRef.current.shift();
+      } else {
+        historyIndexRef.current++;
+      }
+      return prev;
     });
   };
 
@@ -260,7 +273,7 @@ function useHistory<T>(initialState: T, maxHistorySize: number = 50) {
     }
   };
 
-  return { state, setState: updateState, undo };
+  return { state, setState: updateState, setStateWithoutHistory, commit, undo };
 }
 
 export default function WeatherMapEditor() {
@@ -288,7 +301,7 @@ export default function WeatherMapEditor() {
     const saved = loadProjectFromLocalStorage();
     return saved?.elements ?? [];
   })();
-  const { state: elements, setState: setElements, undo: undoElements } = useHistory<ElementT[]>(initialElements, 50);
+  const { state: elements, setState: setElements, setStateWithoutHistory: setElementsTemp, commit: commitElements, undo: undoElements } = useHistory<ElementT[]>(initialElements, 50);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectionBox, setSelectionBox] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(null);
   const [isDrawingSelection, setIsDrawingSelection] = useState(false);
@@ -773,7 +786,22 @@ export default function WeatherMapEditor() {
 
   // Drag (en %)
   const dragRef = useRef<{ ids: string[]; dx: number; dy: number } | null>(null);
-  const resizeRef = useRef<{ id: string } | null>(null);
+  const resizeRef = useRef<
+    | null
+    | {
+        mode: 'pressure';
+        ids: string[];
+        anchorId: string;
+      }
+    | {
+        mode: 'linear';
+        ids: string[];
+        anchorId: string;
+        startXPct: number;
+        startYPct: number;
+        initialSizes: Record<string, number>;
+      }
+  >(null);
 
   function onStagePointerDown(e: React.PointerEvent) {
     if (activeTool === "add-icon" || activeTool === "add-label" || activeTool === "add-temp" || activeTool === "add-wind") {
@@ -808,16 +836,50 @@ export default function WeatherMapEditor() {
 
   // Mouse move for ghost preview and selection box
   function onStagePointerMove(e: React.PointerEvent) {
-    // Resizing pressure zone
+    // Resizing (pressure or linear for icons/text/wind)
     if (resizeRef.current) {
       const p = stagePointPctFromEvent(e);
-      const id = resizeRef.current.id;
-      const el = elements.find((x) => x.id === id) as PressureZoneElement | undefined;
-      if (el && el.kind === 'pressure') {
-        const dx = p.xPct - el.x;
-        const dy = p.yPct - el.y;
-        const r = clamp(Math.sqrt(dx * dx + dy * dy), 2, 50);
-        setElements((prev) => prev.map((e2) => (e2.id === id ? ({ ...e2, radius: r } as ElementT) : e2)));
+      const rr = resizeRef.current;
+      if (rr.mode === 'pressure') {
+        const anchor = elements.find((x) => x.id === rr.anchorId) as PressureZoneElement | undefined;
+        if (anchor && anchor.kind === 'pressure') {
+          const dx = p.xPct - anchor.x;
+          const dy = p.yPct - anchor.y;
+          const rRaw = Math.sqrt(dx * dx + dy * dy);
+          const r = Math.round(clamp(rRaw, 2, 50) * 10) / 10;
+          setElementsTemp((prev) => prev.map((e2) => (e2.id === anchor.id ? ({ ...e2, radius: r } as ElementT) : e2)));
+        }
+      } else if (rr.mode === 'linear') {
+        const stageW = stageSize.w || 0;
+        const deltaXPx = ((p.xPct - rr.startXPct) / 100) * stageW;
+        setElementsTemp((prev) =>
+          prev.map((el) => {
+            if (!rr.ids.includes(el.id)) return el;
+            const init = rr.initialSizes[el.id];
+            if (el.kind === 'icon') {
+              const newSize = Math.round(clamp(init + deltaXPx * 0.8, 16, 200) * 10) / 10;
+              return { ...el, size: newSize };
+            }
+            if (el.kind === 'label' || el.kind === 'temp' || el.kind === 'wind') {
+              const newFs = Math.round(clamp(init + deltaXPx * 0.5, 10, 120) * 10) / 10;
+              // Persist last size knobs when single element selected
+              if (el.kind === 'label') {
+                setLastLabelFontSize(newFs);
+              } else if (el.kind === 'temp') {
+                setLastTempFontSize(newFs);
+              } else if (el.kind === 'wind') {
+                setLastWindFontSize(newFs);
+              }
+              return { ...el, fontSize: newFs } as ElementT;
+            }
+            if (el.kind === 'pressure') {
+              // For mixed selection, allow linear horizontal delta to adjust radius
+              const newR = Math.round(clamp(init + (p.xPct - rr.startXPct), 2, 50) * 10) / 10;
+              return { ...el, radius: newR } as ElementT;
+            }
+            return el;
+          })
+        );
       }
       return;
     }
@@ -859,6 +921,8 @@ export default function WeatherMapEditor() {
   // Mouse up: finalize selection box
   function onStagePointerUp(e: React.PointerEvent) {
     if (resizeRef.current) {
+      // Commit final resize state to history in a single step
+      commitElements();
       resizeRef.current = null;
       return;
     }
@@ -1070,23 +1134,26 @@ export default function WeatherMapEditor() {
 
   function handleLabelFontSizeChange(value: number) {
     const clamped = clamp(value, 10, 80);
-    setLastLabelFontSize(clamped);
-    localStorage.setItem('lastLabelFontSize', String(clamped));
-    updateSelected({ fontSize: clamped } as any);
+    const rounded = Math.round(clamped * 10) / 10;
+    setLastLabelFontSize(rounded);
+    localStorage.setItem('lastLabelFontSize', String(rounded));
+    updateSelected({ fontSize: rounded } as any);
   }
 
   function handleTempFontSizeChange(value: number) {
     const clamped = clamp(value, 10, 80);
-    setLastTempFontSize(clamped);
-    localStorage.setItem('lastTempFontSize', String(clamped));
-    updateSelected({ fontSize: clamped } as any);
+    const rounded = Math.round(clamped * 10) / 10;
+    setLastTempFontSize(rounded);
+    localStorage.setItem('lastTempFontSize', String(rounded));
+    updateSelected({ fontSize: rounded } as any);
   }
 
   function handleWindFontSizeChange(value: number) {
     const clamped = clamp(value, 10, 80);
-    setLastWindFontSize(clamped);
-    localStorage.setItem('lastWindFontSize', String(clamped));
-    updateSelected({ fontSize: clamped } as any);
+    const rounded = Math.round(clamped * 10) / 10;
+    setLastWindFontSize(rounded);
+    localStorage.setItem('lastWindFontSize', String(rounded));
+    updateSelected({ fontSize: rounded } as any);
   }
 
   function addCustomIcon() {
@@ -1283,13 +1350,13 @@ export default function WeatherMapEditor() {
                         >
                           {labelText}
                         </div>
-                        {/* Resize handle (east) only when selected */}
-                        {isSelItem && (
+                        {/* Resize handle (east) only when selected and not locked */}
+                        {isSelItem && !el.locked && (
                           <div
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               if (!isSelected(el.id)) setSelection(el.id);
-                              resizeRef.current = { id: el.id };
+                              resizeRef.current = { mode: 'pressure', ids: selectedIds, anchorId: el.id };
                               (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                             }}
                             className="absolute bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full"
@@ -1314,6 +1381,40 @@ export default function WeatherMapEditor() {
                         title={icon.label}
                       >
                         <span aria-label={icon.label}>{icon.glyph}</span>
+                        {/* Resize handle (east) for icons when selected and not locked */}
+                        {isSelItem && !el.locked && (
+                          <div
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              if (!isSelected(el.id)) setSelection(el.id);
+                              const p = stagePointPctFromEvent(e as any);
+                              const resizableIds = (selectedIds.includes(el.id) ? selectedIds : [el.id]).filter((id) => {
+                                const x = elements.find((ee) => ee.id === id);
+                                return x && !x.locked;
+                              });
+                              const initialSizes: Record<string, number> = {};
+                              resizableIds.forEach((rid) => {
+                                const x = elements.find((ee) => ee.id === rid);
+                                if (!x) return;
+                                if (x.kind === 'icon') initialSizes[rid] = x.size;
+                                else if (x.kind === 'label' || x.kind === 'temp' || x.kind === 'wind') initialSizes[rid] = x.fontSize as number;
+                                else if (x.kind === 'pressure') initialSizes[rid] = x.radius as number;
+                              });
+                              resizeRef.current = {
+                                mode: 'linear',
+                                ids: resizableIds,
+                                anchorId: el.id,
+                                startXPct: p.xPct,
+                                startYPct: p.yPct,
+                                initialSizes,
+                              };
+                              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                            }}
+                            className="absolute bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full"
+                            style={{ left: '100%', top: '50%', transform: 'translate(-50%, -50%)', width: 10, height: 10, cursor: 'ew-resize' }}
+                            title="Redimensionner"
+                          />
+                        )}
                       </div>
                     );
                   }
@@ -1336,6 +1437,40 @@ export default function WeatherMapEditor() {
                         >
                           {String(el.value).includes("°") ? el.value : `${el.value}°C`}
                         </div>
+                        {/* Resize handle (east) for temp when selected and not locked */}
+                        {isSelItem && !el.locked && (
+                          <div
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              if (!isSelected(el.id)) setSelection(el.id);
+                              const p = stagePointPctFromEvent(e as any);
+                              const resizableIds = (selectedIds.includes(el.id) ? selectedIds : [el.id]).filter((id) => {
+                                const x = elements.find((ee) => ee.id === id);
+                                return x && !x.locked;
+                              });
+                              const initialSizes: Record<string, number> = {};
+                              resizableIds.forEach((rid) => {
+                                const x = elements.find((ee) => ee.id === rid);
+                                if (!x) return;
+                                if (x.kind === 'icon') initialSizes[rid] = x.size;
+                                else if (x.kind === 'label' || x.kind === 'temp' || x.kind === 'wind') initialSizes[rid] = x.fontSize as number;
+                                else if (x.kind === 'pressure') initialSizes[rid] = x.radius as number;
+                              });
+                              resizeRef.current = {
+                                mode: 'linear',
+                                ids: resizableIds,
+                                anchorId: el.id,
+                                startXPct: p.xPct,
+                                startYPct: p.yPct,
+                                initialSizes,
+                              };
+                              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                            }}
+                            className="absolute bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full"
+                            style={{ left: '100%', top: '50%', transform: 'translate(-50%, -50%)', width: 10, height: 10, cursor: 'ew-resize' }}
+                            title="Redimensionner"
+                          />
+                        )}
                       </div>
                     );
                   }
@@ -1358,6 +1493,40 @@ export default function WeatherMapEditor() {
                         >
                           💨 {el.speedKmh} km/h
                         </div>
+                        {/* Resize handle (east) for wind when selected and not locked */}
+                        {isSelItem && !el.locked && (
+                          <div
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              if (!isSelected(el.id)) setSelection(el.id);
+                              const p = stagePointPctFromEvent(e as any);
+                              const resizableIds = (selectedIds.includes(el.id) ? selectedIds : [el.id]).filter((id) => {
+                                const x = elements.find((ee) => ee.id === id);
+                                return x && !x.locked;
+                              });
+                              const initialSizes: Record<string, number> = {};
+                              resizableIds.forEach((rid) => {
+                                const x = elements.find((ee) => ee.id === rid);
+                                if (!x) return;
+                                if (x.kind === 'icon') initialSizes[rid] = x.size;
+                                else if (x.kind === 'label' || x.kind === 'temp' || x.kind === 'wind') initialSizes[rid] = x.fontSize as number;
+                                else if (x.kind === 'pressure') initialSizes[rid] = x.radius as number;
+                              });
+                              resizeRef.current = {
+                                mode: 'linear',
+                                ids: resizableIds,
+                                anchorId: el.id,
+                                startXPct: p.xPct,
+                                startYPct: p.yPct,
+                                initialSizes,
+                              };
+                              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                            }}
+                            className="absolute bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full"
+                            style={{ left: '100%', top: '50%', transform: 'translate(-50%, -50%)', width: 10, height: 10, cursor: 'ew-resize' }}
+                            title="Redimensionner"
+                          />
+                        )}
                       </div>
                     );
                   }
@@ -1377,6 +1546,40 @@ export default function WeatherMapEditor() {
                       <div className={"px-2 py-1 rounded-lg " + (el.bg ? "bg-white/85 backdrop-blur" : "") + (el.border ? " border shadow-sm" : "")} style={{ color: el.color, fontSize: el.fontSize, fontWeight: 700, cursor: 'move' }}>
                         {el.text}
                       </div>
+                      {/* Resize handle (east) for label when selected and not locked */}
+                      {isSelItem && !el.locked && (
+                        <div
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            if (!isSelected(el.id)) setSelection(el.id);
+                            const p = stagePointPctFromEvent(e as any);
+                            const resizableIds = (selectedIds.includes(el.id) ? selectedIds : [el.id]).filter((id) => {
+                              const x = elements.find((ee) => ee.id === id);
+                              return x && !x.locked;
+                            });
+                            const initialSizes: Record<string, number> = {};
+                            resizableIds.forEach((rid) => {
+                              const x = elements.find((ee) => ee.id === rid);
+                              if (!x) return;
+                              if (x.kind === 'icon') initialSizes[rid] = x.size;
+                              else if (x.kind === 'label' || x.kind === 'temp' || x.kind === 'wind') initialSizes[rid] = x.fontSize as number;
+                              else if (x.kind === 'pressure') initialSizes[rid] = x.radius as number;
+                            });
+                            resizeRef.current = {
+                              mode: 'linear',
+                              ids: resizableIds,
+                              anchorId: el.id,
+                              startXPct: p.xPct,
+                              startYPct: p.yPct,
+                              initialSizes,
+                            };
+                            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                          }}
+                          className="absolute bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-full"
+                          style={{ left: '100%', top: '50%', transform: 'translate(-50%, -50%)', width: 10, height: 10, cursor: 'ew-resize' }}
+                          title="Redimensionner"
+                        />
+                      )}
                     </div>
                   );
                 })}
@@ -1665,6 +1868,22 @@ export default function WeatherMapEditor() {
             {contextMenu.target === 'item' ? (
               // Menu for selected item(s)
               <>
+                {/* Lock/Unlock */}
+                <button
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                  onClick={() => {
+                    const anyLocked = contextMenu.targetIds.some(id => elements.find(e => e.id === id)?.locked);
+                    setLocked(contextMenu.targetIds, !anyLocked);
+                    setContextMenu(null);
+                  }}
+                >
+                  {contextMenu.targetIds.some(id => elements.find(e => e.id === id)?.locked) ? (
+                    <Unlock className="h-3.5 w-3.5" />
+                  ) : (
+                    <Lock className="h-3.5 w-3.5" />
+                  )}
+                  {contextMenu.targetIds.some(id => elements.find(e => e.id === id)?.locked) ? 'Déverrouiller' : 'Verrouiller'}
+                </button>
                 {/* Only show Edit button for non-pressure items */}
                 {!contextMenu.targetIds.every(id => elements.find(e => e.id === id)?.kind === 'pressure') && (
                   <button
