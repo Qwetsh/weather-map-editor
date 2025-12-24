@@ -129,9 +129,3 @@ Les fonds cartographiques utilisés sont issus de sources libres (ex. Natural Ea
 ## ✍️ Auteur
 
 Projet conçu par Thomas CHARLES pour un usage réel en classe et à la maison.
-Objectif : proposer un outil **simple, rigoureux scientifiquement et engageant pour les élèves**.
-
----
-
-
-Dis-moi 👌
