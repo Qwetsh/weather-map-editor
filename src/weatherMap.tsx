@@ -18,6 +18,7 @@ import {
   Unlock,
 } from "lucide-react";
 import { toPng } from "html-to-image";
+import LeafletPicker from "@/components/LeafletPicker";
 import franceImg from "/img/france.png";
 import europeImg from "/img/europe.png";
 import worldImg from "/img/world.png";
@@ -108,6 +109,11 @@ const BUILTIN_BACKGROUNDS = [
     id: "world",
     label: "Monde (simplifié)",
     src: worldImg,
+  },
+  {
+    id: "leaflet",
+    label: "Carte interactive",
+    src: null,
   },
 ];
 
@@ -653,7 +659,12 @@ export default function WeatherMapEditor() {
 
   function setBuiltinBg(id: string) {
     const bg = BUILTIN_BACKGROUNDS.find((b) => b.id === id) ?? BUILTIN_BACKGROUNDS[0];
-    if (bg.id === "grid") {
+    if (bg.id === "leaflet") {
+      setBgId("leaflet");
+      setBgUrl(null);
+      setAspectRatio("16 / 9");
+      clearSelection();
+    } else if (bg.id === "grid") {
       setBgId(bg.id);
       setBgUrl(bg.src);
       setAspectRatio("16 / 9");
@@ -669,6 +680,12 @@ export default function WeatherMapEditor() {
       };
       img.src = bg.src;
     }
+  }
+
+  function onLeafletCapture(dataUrl: string, w: number, h: number) {
+    setBgId("leaflet-captured");
+    setBgUrl(dataUrl);
+    setAspectRatio(`${w} / ${h}`);
   }
 
   function onUploadBg(file: File | null) {
@@ -1202,10 +1219,15 @@ export default function WeatherMapEditor() {
                 <Label className="text-sm">Fonds intégrés</Label>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {BUILTIN_BACKGROUNDS.map((b) => (
-                    <Button key={b.id} variant={bgId === b.id ? "default" : "outline"} className="rounded-xl" onClick={() => setBuiltinBg(b.id)}>
+                    <Button key={b.id} variant={bgId === b.id || (b.id === "leaflet" && bgId === "leaflet-captured") ? "default" : "outline"} className="rounded-xl" onClick={() => setBuiltinBg(b.id)}>
                       {b.label}
                     </Button>
                   ))}
+                  {bgId === "leaflet-captured" && (
+                    <Button variant="outline" className="rounded-xl" onClick={() => setBgId("leaflet")}>
+                      🗺️ Recadrer
+                    </Button>
+                  )}
                 </div>
               </div>
               <div>
@@ -1263,7 +1285,9 @@ export default function WeatherMapEditor() {
                 className="relative w-full overflow-hidden rounded-xl border bg-slate-100 dark:bg-slate-700"
                 style={{ aspectRatio }}
               >
-                {bgUrl ? (
+                {bgId === "leaflet" ? (
+                  <LeafletPicker onCapture={onLeafletCapture} theme={theme} />
+                ) : bgUrl ? (
                   <img src={bgUrl} alt="Fond de carte" className="absolute inset-0 h-full w-full object-contain" draggable={false} />
                 ) : null}
 
