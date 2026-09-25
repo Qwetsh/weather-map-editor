@@ -1,159 +1,144 @@
-/* Pressure zone rotation animation */
+@import "@fontsource-variable/lexend";
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------- Jetons de couleur ---------- */
+:root {
+  --background: oklch(0.975 0.006 240);
+  --foreground: oklch(0.24 0.03 255);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.965 0.008 240);
+  --muted-foreground: oklch(0.52 0.025 255);
+  --border: oklch(0.91 0.012 245);
+  --input: oklch(0.88 0.015 245);
+
+  --primary: oklch(0.6 0.16 240);
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-soft: oklch(0.94 0.04 235);
+  --primary-soft-foreground: oklch(0.42 0.14 245);
+
+  --destructive: oklch(0.6 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --ring: oklch(0.6 0.16 240 / 0.45);
+  --canvas: oklch(0.935 0.012 240);
+  --canvas-dot: oklch(0.82 0.02 245);
+
+  --anticyclone: #2563eb;
+  --depression: #dc2626;
+  --selection: #0ea5e9;
+}
+
+.dark {
+  --background: oklch(0.19 0.02 255);
+  --foreground: oklch(0.95 0.008 245);
+  --surface: oklch(0.235 0.022 255);
+  --surface-2: oklch(0.27 0.024 255);
+  --muted-foreground: oklch(0.7 0.02 250);
+  --border: oklch(0.32 0.024 255);
+  --input: oklch(0.38 0.026 255);
+
+  --primary: oklch(0.7 0.14 235);
+  --primary-foreground: oklch(0.18 0.03 255);
+  --primary-soft: oklch(0.32 0.06 245);
+  --primary-soft-foreground: oklch(0.88 0.06 235);
+
+  --destructive: oklch(0.65 0.19 25);
+
+  --ring: oklch(0.7 0.14 235 / 0.5);
+  --canvas: oklch(0.16 0.018 255);
+  --canvas-dot: oklch(0.3 0.02 255);
+}
+
+@theme inline {
+  --font-sans: "Lexend Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-soft-foreground: var(--primary-soft-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --color-canvas: var(--canvas);
+  --color-selection: var(--selection);
+
+  --animate-pop-in: pop-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  --animate-fade-in: fade-in 120ms ease-out;
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-2px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes pressure-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222.2 84% 4.9%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222.2 84% 4.9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 84% 4.9%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 94.1%;
-  }
-}
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: var(--color-border);
   }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
   }
-  
-  /* Custom scrollbar styling */
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgb(203 213 225) rgb(241 245 249);
-  }
-  
-  .dark * {
-    scrollbar-color: rgb(71 85 105) rgb(30 41 59);
-  }
-  
-  *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-  
-  *::-webkit-scrollbar-track {
-    background: rgb(241 245 249);
-    border-radius: 4px;
-  }
-  
-  .dark *::-webkit-scrollbar-track {
-    background: rgb(30 41 59);
-  }
-  
-  *::-webkit-scrollbar-thumb {
-    background: rgb(203 213 225);
-    border-radius: 4px;
-  }
-  
-  *::-webkit-scrollbar-thumb:hover {
-    background: rgb(148 163 184);
-  }
-  
-  .dark *::-webkit-scrollbar-thumb {
-    background: rgb(71 85 105);
-  }
-  
-  .dark *::-webkit-scrollbar-thumb:hover {
-    background: rgb(100 116 139);
+    scrollbar-color: var(--color-input) transparent;
   }
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+@layer utilities {
+  /* Fond pointillé de la zone de travail */
+  .bg-canvas-dots {
+    background-color: var(--color-canvas);
+    background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+    background-size: 18px 18px;
   }
-  a:hover {
-    color: #747bff;
+
+  /* Halo blanc autour du texte posé sur la carte */
+  .text-halo {
+    text-shadow:
+      0 0 2px #fff,
+      0 0 3px #fff,
+      0 0 6px rgb(255 255 255 / 0.9);
   }
-  button {
-    background-color: #f9f9f9;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pressure-rotor {
+    animation: none !important;
   }
 }

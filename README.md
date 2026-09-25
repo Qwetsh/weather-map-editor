@@ -36,10 +36,10 @@ L’outil permet aux élèves de **créer une carte météo du futur** en lien a
 
 ### 🌤️ Éléments météo
 
-* Icônes météo (soleil, pluie, orage, canicule, cyclone, etc.)
-* Création d’icônes personnalisées
+* Pictos météo dessinés en SVG, identiques sur tous les appareils : soleil, éclaircies, nuages, pluie, orage, neige, brouillard, vent, canicule, sécheresse, incendie, inondation, cyclone
+* Création de pictos personnalisés (emoji + nom pour la légende)
 * Ajout de villes
-* Ajout de températures (avec anomalies possibles)
+* Ajout de températures (pastille colorée automatiquement selon la valeur, ou texte libre)
 * Ajout de la force du vent
 
 ### 🌀 Pressions atmosphériques
@@ -60,7 +60,8 @@ L’outil permet aux élèves de **créer une carte météo du futur** en lien a
 * Copie / collage (Ctrl+C / Ctrl+V)
 * Menu contextuel (clic droit)
 * Verrouillage d’éléments
-* Annulation (Undo – Ctrl+Z)
+* Annuler / rétablir (Ctrl+Z / Ctrl+Y)
+* Déplacement fin aux flèches du clavier, premier plan / arrière-plan
 
 ### 📌 Aide à la lecture
 
@@ -102,11 +103,23 @@ L’outil permet aux élèves de **créer une carte météo du futur** en lien a
 
 ## 🛠️ Stack technique
 
-* **Vite**
-* **React**
-* **TypeScript**
-* **Tailwind CSS**
-* Développement assisté par **GitHub Copilot**
+* **Vite 8** + **React 19**
+* **TypeScript** (mode strict)
+* **Tailwind CSS 4**, composants **Radix UI**, icônes **Lucide**
+* **Leaflet** pour la carte interactive (tuiles Esri Light Gray)
+* Police **Lexend** embarquée (fonctionne hors connexion)
+
+### Organisation du code
+
+```
+src/editor/
+  model.ts          types, fonds de carte, pictos, valeurs par défaut
+  project.ts        sauvegarde auto, import/export JSON (compatible anciens projets)
+  useHistory.ts     annuler / rétablir
+  EditorContext.tsx état de l'éditeur et actions
+  stage/            la carte : interactions, éléments, légende, menu contextuel
+  panels/           barre du haut, outils, palette de pictos, panneau de propriétés
+```
 
 ---
 
@@ -114,7 +127,9 @@ L’outil permet aux élèves de **créer une carte météo du futur** en lien a
 
 ```bash
 npm install
-npm run dev
+npm run dev        # serveur de développement
+npm run build      # vérification TypeScript + build dans docs/ (GitHub Pages)
+npm run lint
 ```
 
 ---
